@@ -66,9 +66,18 @@ jQuery(function($) {
         
         if (Object.keys(categories).length > 0) {
             const label = mlcmVars.labels[nextLevel-1];
+            
+            // Сортировка элементов по имени
+            const sortedEntries = Object.entries(categories)
+                .sort((a, b) => a[1].localeCompare(
+                    b[1], 
+                    undefined, 
+                    { sensitivity: 'base' }
+                ));
+    
             $nextSelect.prop('disabled', false)
                        .html(`<option value="-1">${label}</option>` + 
-                             Object.entries(categories).map(([id, name]) => 
+                             sortedEntries.map(([id, name]) => 
                                `<option value="${id}">${name}</option>`).join(''));
         } else {
             window.location = `/?cat=${$select.val()}`;
