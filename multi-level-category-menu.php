@@ -76,6 +76,7 @@ class Multi_Level_Category_Menu {
     }
 
     private function generate_menu_html($atts) {
+        $show_button = get_option('mlcm_show_button', '0') === '1';
         ob_start(); ?>
         <div class="mlcm-container <?= esc_attr($atts['layout']) ?>" 
              data-levels="<?= absint($atts['levels']) ?>">
@@ -84,6 +85,11 @@ class Multi_Level_Category_Menu {
                     <?php $this->render_select($i); ?>
                 </div>
             <?php endfor; ?>
+            <?php if ($show_button): ?>
+                <button type="button" class="mlcm-go-button <?= esc_attr($atts['layout']) ?>">
+                    <?php esc_html_e('Go', 'mlcm'); ?>
+                </button>
+            <?php endif; ?>
         </div>
         <?php return ob_get_clean();
     }
@@ -91,9 +97,11 @@ class Multi_Level_Category_Menu {
     private function render_select($level) {
         $label = get_option("mlcm_level_{$level}_label", "Level {$level}");
         $categories = ($level === 1) ? $this->get_root_categories() : [];
+        $width = get_option('mlcm_menu_width', 250);
         ?>
         <select class="mlcm-select" data-level="<?= $level ?>" 
-                <?= $level > 1 ? 'disabled' : '' ?>>
+                <?= $level > 1 ? 'disabled' : '' ?>
+                style="width: <?php echo absint($width); ?>px;">
             <option value="-1"><?= esc_html($label) ?></option>
             <?php foreach ($categories as $id => $name): ?>
                 <option value="<?= absint($id) ?>"><?= esc_html($name) ?></option>
@@ -146,6 +154,8 @@ class Multi_Level_Category_Menu {
         register_setting('mlcm_options', 'mlcm_menu_layout');
         register_setting('mlcm_options', 'mlcm_initial_levels');
         register_setting('mlcm_options', 'mlcm_excluded_cats');
+        register_setting('mlcm_options', 'mlcm_menu_width');
+        register_setting('mlcm_options', 'mlcm_show_button');
         
         for ($i = 1; $i <= 5; $i++) {
             register_setting('mlcm_options', "mlcm_level_{$i}_label");
@@ -164,6 +174,16 @@ class Multi_Level_Category_Menu {
         add_settings_field('mlcm_levels', 'Initial Levels', function() {
             $levels = get_option('mlcm_initial_levels', 3);
             echo '<input type="number" min="1" max="5" name="mlcm_initial_levels" value="'.absint($levels).'">';
+        }, 'mlcm_options', 'mlcm_main');
+
+        add_settings_field('mlcm_width', 'Menu Width (px)', function() {
+            $width = get_option('mlcm_menu_width', 250);
+            echo '<input type="number" min="100" step="10" name="mlcm_menu_width" value="'.absint($width).'">';
+        }, 'mlcm_options', 'mlcm_main');
+
+        add_settings_field('mlcm_show_button', 'Show Go Button', function() {
+            $show = get_option('mlcm_show_button', '0');
+            echo '<label><input type="checkbox" name="mlcm_show_button" value="1" '.checked($show, '1', false).'> '.__('Enable Go button', 'mlcm').'</label>';
         }, 'mlcm_options', 'mlcm_main');
 
         add_settings_field('mlcm_exclude', 'Excluded Categories', function() {

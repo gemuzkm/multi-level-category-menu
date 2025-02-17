@@ -22,7 +22,7 @@
 
         edit: ({ attributes, setAttributes }) => {
             return (
-                
+                <>
                     <InspectorControls>
                         <PanelBody title={__('Settings', 'mlcm')}>
                             <SelectControl

@@ -15,6 +15,18 @@ jQuery(function($) {
         loadSubcategories($select, level, parentId);
     });
 
+    container.on('click', '.mlcm-go-button', function() {
+        const selected = container.find('.mlcm-select:enabled').filter(function() {
+            return $(this).val() !== '-1';
+        });
+        
+        if (selected.length === 0) return;
+        
+        const lastSelected = selected.last();
+        const catId = lastSelected.val();
+        window.location = `/?cat=${catId}`;
+    });
+
     function resetLevels(currentLevel) {
         container.find('.mlcm-select').each(function() {
             if ($(this).data('level') > currentLevel) {
