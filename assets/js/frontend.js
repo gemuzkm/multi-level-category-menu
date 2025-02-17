@@ -1,7 +1,26 @@
 jQuery(function($) {
-    const container = $('.mlcm-container');
-    const maxLevels = container.data('levels');
+    const $containers = $('.mlcm-container');
     
+    // Удаляем дубликаты кнопок
+    $containers.each(function() {
+        const $buttons = $(this).find('.mlcm-go-button');
+        if ($buttons.length > 1) {
+            $buttons.slice(1).remove();
+        }
+    });
+    
+    // Применение динамических стилей
+    container.each(function() {
+        const $cont = $(this);
+        const gap = parseInt($cont.css('gap')) || 20;
+        const fontSize = $cont.css('font-size');
+        
+        // Установка CSS-переменных
+        $cont[0].style.setProperty('--mlcm-gap', `${gap}px`);
+        $cont[0].style.setProperty('--mlcm-font-size', fontSize);
+    });
+
+    // Обработчик изменений в селектах
     container.on('change', '.mlcm-select', function() {
         const $select = $(this);
         const level = $select.data('level');
@@ -15,6 +34,7 @@ jQuery(function($) {
         loadSubcategories($select, level, parentId);
     });
 
+    // Обработчик клика по кнопке
     container.on('click', '.mlcm-go-button', function() {
         const selected = container.find('.mlcm-select:enabled').filter(function() {
             return $(this).val() !== '-1';
@@ -27,6 +47,7 @@ jQuery(function($) {
         window.location = `/?cat=${catId}`;
     });
 
+    // Сброс последующих уровней
     function resetLevels(currentLevel) {
         container.find('.mlcm-select').each(function() {
             if ($(this).data('level') > currentLevel) {
@@ -35,7 +56,9 @@ jQuery(function($) {
         });
     }
 
+    // Загрузка подкатегорий
     function loadSubcategories($select, level, parentId) {
+        const maxLevels = container.data('levels');
         if (level >= maxLevels) {
             window.location = `/?cat=${parentId}`;
             return;
@@ -60,6 +83,7 @@ jQuery(function($) {
         });
     }
 
+    // Обновление следующего уровня
     function updateNextLevel($select, currentLevel, categories) {
         const nextLevel = currentLevel + 1;
         const $nextSelect = $(`.mlcm-select[data-level="${nextLevel}"]`);
@@ -77,4 +101,18 @@ jQuery(function($) {
             window.location = `/?cat=${$select.val()}`;
         }
     }
+
+    // Адаптация для мобильных устройств
+    function handleMobileLayout() {
+        if (window.matchMedia('(max-width: 768px)').matches) {
+            container.find('.mlcm-go-button').css({
+                'width': '100%',
+                'margin': '10px 0 0 0'
+            });
+        }
+    }
+
+    // Инициализация адаптива
+    handleMobileLayout();
+    $(window).on('resize', handleMobileLayout);
 });
