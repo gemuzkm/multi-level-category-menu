@@ -34,27 +34,6 @@ class Multi_Level_Category_Menu {
         add_action('admin_enqueue_scripts', [$this, 'enqueue_admin_assets']);
     }
 
-    public function enqueue_admin_assets($hook) {
-        if ($hook === 'settings_page_mlcm-settings') {
-            wp_enqueue_script(
-                'mlcm-admin',
-                plugins_url('assets/js/admin.js', __FILE__),
-                ['jquery'],
-                filemtime(plugin_dir_path(__FILE__) . 'assets/js/admin.js'),
-                true
-            );
-    
-            wp_localize_script('mlcm-admin', 'mlcmAdmin', [
-                'ajax_url' => admin_url('admin-ajax.php'),
-                'nonce' => wp_create_nonce('mlcm_admin_nonce'),
-                'i18n' => [
-                    'cache_cleared' => __('Cache successfully cleared', 'mlcm'),
-                    'error' => __('Error clearing cache', 'mlcm')
-                ]
-            ]);
-        }
-    }
-
     public function register_gutenberg_block() {
         wp_register_script(
             'mlcm-block-editor',
@@ -100,15 +79,15 @@ class Multi_Level_Category_Menu {
     private function generate_menu_html($atts) {
         $show_button = get_option('mlcm_show_button', '0') === '1';
         ob_start(); ?>
-        <div class="mlcm-container <?= esc_attr($atts['layout']) ?>" 
-             data-levels="<?= absint($atts['levels']) ?>">
+        <div class="mlcm-container <?php echo esc_attr($atts['layout']); ?>" 
+             data-levels="<?php echo absint($atts['levels']); ?>">
             <?php for($i = 1; $i <= $atts['levels']; $i++): ?>
-                <div class="mlcm-level" data-level="<?= $i ?>">
+                <div class="mlcm-level" data-level="<?php echo $i; ?>">
                     <?php $this->render_select($i); ?>
                 </div>
             <?php endfor; ?>
             <?php if ($show_button): ?>
-                <button type="button" class="mlcm-go-button <?= esc_attr($atts['layout']) ?>">
+                <button type="button" class="mlcm-go-button <?php echo esc_attr($atts['layout']); ?>">
                     <?php esc_html_e('Go', 'mlcm'); ?>
                 </button>
             <?php endif; ?>
@@ -119,14 +98,13 @@ class Multi_Level_Category_Menu {
     private function render_select($level) {
         $label = get_option("mlcm_level_{$level}_label", "Level {$level}");
         $categories = ($level === 1) ? $this->get_root_categories() : [];
-        $width = get_option('mlcm_menu_width', 250);
         ?>
-        <select class="mlcm-select" data-level="<?= $level ?>" 
-                <?= $level > 1 ? 'disabled' : '' ?>
-                style="width: <?php echo absint($width); ?>px;">
-            <option value="-1"><?= esc_html($label) ?></option>
+        <select class="mlcm-select" 
+                data-level="<?php echo absint($level); ?>" 
+                <?php echo ($level > 1) ? 'disabled' : ''; ?>>
+            <option value="-1"><?php echo esc_html($label); ?></option>
             <?php foreach ($categories as $id => $name): ?>
-                <option value="<?= absint($id) ?>"><?= esc_html($name) ?></option>
+                <option value="<?php echo absint($id); ?>"><?php echo esc_html($name); ?></option>
             <?php endforeach; ?>
         </select>
         <?php
@@ -227,7 +205,7 @@ class Multi_Level_Category_Menu {
                 'mlcm_main'
             );
         }
-        
+
         add_settings_field('mlcm_cache', 'Cache Management', function() {
             echo '<button type="button" class="button" id="mlcm-clear-cache">
                 '.__('Clear All Caches', 'mlcm').'</button>
@@ -246,24 +224,13 @@ class Multi_Level_Category_Menu {
 
     public function clear_all_caches() {
         global $wpdb;
-        
-        try {
-            delete_transient('mlcm_root_cats');
-            $result = $wpdb->query(
-                "DELETE FROM $wpdb->options 
-                WHERE option_name LIKE '_transient_mlcm_subcats_%' 
-                OR option_name LIKE '_transient_timeout_mlcm_subcats_%'"
-            );
-            
-            if ($result === false) {
-                throw new Exception('Database query failed');
-            }
-            
-            return true;
-        } catch (Exception $e) {
-            error_log('MLCM Cache Clear Error: ' . $e->getMessage());
-            return false;
-        }
+        delete_transient('mlcm_root_cats');
+        $result = $wpdb->query(
+            "DELETE FROM $wpdb->options 
+            WHERE option_name LIKE '_transient_mlcm_subcats_%' 
+            OR option_name LIKE '_transient_timeout_mlcm_subcats_%'"
+        );
+        return $result !== false;
     }
 
     public function add_admin_menu() {
@@ -332,24 +299,45 @@ class Multi_Level_Category_Menu {
             'default_levels' => absint(get_option('mlcm_initial_levels', 3))
         ]);
     }
+
+    public function enqueue_admin_assets($hook) {
+        if ($hook === 'settings_page_mlcm-settings') {
+            wp_enqueue_style('mlcm-admin', plugins_url('assets/css/admin.css', __FILE__));
+            wp_enqueue_script(
+                'mlcm-admin', 
+                plugins_url('assets/js/admin.js', __FILE__), 
+                ['jquery'], 
+                filemtime(plugin_dir_path(__FILE__) . 'assets/js/admin.js'),
+                true
+            );
+
+            wp_localize_script('mlcm-admin', 'mlcmAdmin', [
+                'ajax_url' => admin_url('admin-ajax.php'),
+                'nonce' => wp_create_nonce('mlcm_admin_nonce'),
+                'i18n' => [
+                    'clearing' => __('Clearing...', 'mlcm'),
+                    'cache_cleared' => __('Cache successfully cleared', 'mlcm'),
+                    'error' => __('Error clearing cache', 'mlcm')
+                ]
+            ]);
+        }
+    }
 }
 
 Multi_Level_Category_Menu::get_instance();
 
 add_action('wp_ajax_mlcm_clear_all_caches', function() {
     check_ajax_referer('mlcm_admin_nonce', 'security');
-    
     try {
-        $cleared = Multi_Level_Category_Menu::get_instance()->clear_all_caches();
-        
-        if ($cleared) {
-            wp_send_json_success(['message' => 'Cache cleared']);
-        } else {
-            throw new Exception('Cache clearance failed');
-        }
+        $success = Multi_Level_Category_Menu::get_instance()->clear_all_caches();
+        wp_send_json_success(['message' => __('Cache cleared', 'mlcm')]);
     } catch (Exception $e) {
         wp_send_json_error(['message' => $e->getMessage()]);
     }
-    
     wp_die();
+});
+
+add_action('wp_head', function() {
+    $width = get_option('mlcm_menu_width', 250);
+    echo '<style>.mlcm-select { width: '.absint($width).'px; }</style>';
 });

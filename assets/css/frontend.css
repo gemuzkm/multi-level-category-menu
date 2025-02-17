@@ -20,6 +20,11 @@
     border-radius: 4px;
     background: #fff;
     transition: all 0.3s ease;
+    width: var(--mlcm-width, 250px); /* Фиксированная ширина для всех */
+}
+
+.mlcm-select.initial-level {
+    width: 250px;
 }
 
 .mlcm-select:disabled {
@@ -52,18 +57,29 @@
     align-self: flex-start;
 }
 
-@media (max-width: 768px) {
+@media screen and (max-width: 768px) {
     .mlcm-container {
-        flex-direction: column;
+        flex-direction: column !important;
+        gap: 12px !important;
     }
     
-    .mlcm-select {
+    .mlcm-container .mlcm-select,
+    .mlcm-container.horizontal .mlcm-select {
         width: 100% !important;
-        min-width: auto;
+        max-width: 100% !important;
+        min-width: unset !important;
+        margin: 0 !important;
     }
     
-    .mlcm-go-button {
-        width: 100%;
+    .mlcm-container .mlcm-go-button,
+    .mlcm-container.horizontal .mlcm-go-button {
+        width: 100% !important;
+        margin: 0 !important;
+        order: 999; /* Перемещаем кнопку в конец */
+    }
+    
+    .mlcm-level {
+        width: 100% !important;
     }
 }
 

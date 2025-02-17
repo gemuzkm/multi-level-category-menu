@@ -7,18 +7,20 @@
     cursor: not-allowed;
 }
 
-.mlcm-notice {
-    margin: 5px 0 15px;
-    padding: 10px;
-    border-left: 4px solid;
+.spinner {
+    visibility: hidden;
+    float: none;
+    margin-left: 10px;
 }
 
-.mlcm-notice.success {
-    border-color: #46b450;
-    background: #f3faf4;
+.notice.is-dismissible {
+    margin: 15px 0;
 }
 
-.mlcm-notice.error {
-    border-color: #dc3232;
-    background: #fbeaea;
+.notice-success {
+    border-left-color: #46b450;
+}
+
+.notice-error {
+    border-left-color: #dc3232;
 }
