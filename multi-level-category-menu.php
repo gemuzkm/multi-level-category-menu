@@ -129,6 +129,7 @@ class Multi_Level_Category_Menu {
         return $cache;
     }
 
+    /*
     public function ajax_handler() {
         check_ajax_referer('mlcm_nonce', 'security');
         
@@ -147,6 +148,50 @@ class Multi_Level_Category_Menu {
             set_transient($cache_key, $response, WEEK_IN_SECONDS);
         }
         
+        wp_send_json_success($response);
+    }
+    */
+
+    public function ajax_handler() {
+        check_ajax_referer('mlcm_nonce', 'security');
+    
+        // Отключаем ненужные компоненты WordPress для ускорения
+        wp_suspend_cache_addition(true);
+        remove_all_actions('plugins_loaded');
+        remove_all_filters('sanitize_title');
+    
+        $parent_id = absint($_POST['parent_id'] ?? 0);
+        $cache_key = "mlcm_subcats_{$parent_id}";
+    
+        // Проверяем кеш
+        if (false === ($response = get_transient($cache_key))) {
+            global $wpdb;
+    
+            // Прямой SQL-запрос для получения категорий
+            $response = $wpdb->get_results($wpdb->prepare("
+                SELECT 
+                    t.term_id as id, 
+                    t.name 
+                FROM {$wpdb->terms} t
+                INNER JOIN {$wpdb->term_taxonomy} tt 
+                    ON t.term_id = tt.term_id
+                WHERE 
+                    tt.parent = %d 
+                    AND tt.taxonomy = 'category'
+                    AND tt.count > 0  # Только непустые категории
+                ORDER BY t.name ASC
+            ", $parent_id), OBJECT_K);
+    
+            // Сохраняем в кеше
+            if (!empty($response)) {
+                $response = array_map(function($item) {
+                    return strtoupper($item->name);
+                }, $response);
+                
+                set_transient($cache_key, $response, WEEK_IN_SECONDS);
+            }
+        }
+    
         wp_send_json_success($response);
     }
 

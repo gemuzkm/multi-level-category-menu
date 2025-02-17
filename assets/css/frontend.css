@@ -21,6 +21,7 @@
     background: #fff;
     transition: all 0.3s ease;
     width: var(--mlcm-width, 250px); /* Фиксированная ширина для всех */
+	font-size: 2rem;
 }
 
 .mlcm-select.initial-level {
@@ -41,6 +42,7 @@
     cursor: pointer;
     transition: background 0.3s ease;
     white-space: nowrap;
+	font-size: 2rem;
 }
 
 .mlcm-go-button:hover {
