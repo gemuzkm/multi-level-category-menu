@@ -1,0 +1,24 @@
+#mlcm-clear-cache {
+    margin-left: 10px;
+}
+
+#mlcm-clear-cache[disabled] {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.mlcm-notice {
+    margin: 5px 0 15px;
+    padding: 10px;
+    border-left: 4px solid;
+}
+
+.mlcm-notice.success {
+    border-color: #46b450;
+    background: #f3faf4;
+}
+
+.mlcm-notice.error {
+    border-color: #dc3232;
+    background: #fbeaea;
+}

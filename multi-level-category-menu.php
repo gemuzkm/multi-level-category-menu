@@ -31,6 +31,28 @@ class Multi_Level_Category_Menu {
         add_action('wp_ajax_nopriv_mlcm_get_subcategories', [$this, 'ajax_handler']);
         add_action('edited_category', [$this, 'clear_related_cache']);
         add_action('create_category', [$this, 'clear_related_cache']);
+        add_action('admin_enqueue_scripts', [$this, 'enqueue_admin_assets']);
+    }
+
+    public function enqueue_admin_assets($hook) {
+        if ($hook === 'settings_page_mlcm-settings') {
+            wp_enqueue_script(
+                'mlcm-admin',
+                plugins_url('assets/js/admin.js', __FILE__),
+                ['jquery'],
+                filemtime(plugin_dir_path(__FILE__) . 'assets/js/admin.js'),
+                true
+            );
+    
+            wp_localize_script('mlcm-admin', 'mlcmAdmin', [
+                'ajax_url' => admin_url('admin-ajax.php'),
+                'nonce' => wp_create_nonce('mlcm_admin_nonce'),
+                'i18n' => [
+                    'cache_cleared' => __('Cache successfully cleared', 'mlcm'),
+                    'error' => __('Error clearing cache', 'mlcm')
+                ]
+            ]);
+        }
     }
 
     public function register_gutenberg_block() {
@@ -205,10 +227,11 @@ class Multi_Level_Category_Menu {
                 'mlcm_main'
             );
         }
-
+        
         add_settings_field('mlcm_cache', 'Cache Management', function() {
             echo '<button type="button" class="button" id="mlcm-clear-cache">
-                Clear All Caches</button>';
+                '.__('Clear All Caches', 'mlcm').'</button>
+                <span class="spinner" style="float:none; margin-left:10px"></span>';
         }, 'mlcm_options', 'mlcm_main');
     }
 
@@ -223,8 +246,24 @@ class Multi_Level_Category_Menu {
 
     public function clear_all_caches() {
         global $wpdb;
-        delete_transient('mlcm_root_cats');
-        $wpdb->query("DELETE FROM $wpdb->options WHERE option_name LIKE '_transient_mlcm_subcats_%'");
+        
+        try {
+            delete_transient('mlcm_root_cats');
+            $result = $wpdb->query(
+                "DELETE FROM $wpdb->options 
+                WHERE option_name LIKE '_transient_mlcm_subcats_%' 
+                OR option_name LIKE '_transient_timeout_mlcm_subcats_%'"
+            );
+            
+            if ($result === false) {
+                throw new Exception('Database query failed');
+            }
+            
+            return true;
+        } catch (Exception $e) {
+            error_log('MLCM Cache Clear Error: ' . $e->getMessage());
+            return false;
+        }
     }
 
     public function add_admin_menu() {
@@ -298,7 +337,19 @@ class Multi_Level_Category_Menu {
 Multi_Level_Category_Menu::get_instance();
 
 add_action('wp_ajax_mlcm_clear_all_caches', function() {
-    check_ajax_referer('mlcm_nonce', 'security');
-    Multi_Level_Category_Menu::get_instance()->clear_all_caches();
+    check_ajax_referer('mlcm_admin_nonce', 'security');
+    
+    try {
+        $cleared = Multi_Level_Category_Menu::get_instance()->clear_all_caches();
+        
+        if ($cleared) {
+            wp_send_json_success(['message' => 'Cache cleared']);
+        } else {
+            throw new Exception('Cache clearance failed');
+        }
+    } catch (Exception $e) {
+        wp_send_json_error(['message' => $e->getMessage()]);
+    }
+    
     wp_die();
 });
