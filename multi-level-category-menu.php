@@ -189,12 +189,11 @@ class Multi_Level_Category_Menu {
         $label = get_option("mlcm_level_{$level}_label", "Level {$level}");
         $categories = ($level === 1) ? $this->get_root_categories() : [];
         ?>
-        <select class="mlcm-select" 
-                data-level="<?php echo absint($level); ?>" 
-                <?php echo ($level > 1) ? 'disabled' : ''; ?>>
-            <option value="-1"><?php echo esc_html($label); ?></option>
+        <select class="mlcm-select" data-level="<?= $level ?>" 
+                <?= $level > 1 ? 'disabled' : '' ?>>
+            <option value="-1"><?= esc_html($label) ?></option>
             <?php foreach ($categories as $id => $name): ?>
-                <option value="<?php echo absint($id); ?>"><?php echo esc_html($name); ?></option>
+                <option value="<?= absint($id) ?>"><?= $name ?></option>
             <?php endforeach; ?>
         </select>
         <?php
