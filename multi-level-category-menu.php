@@ -2,7 +2,7 @@
 /*
 Plugin Name: Multi-Level Category Menu
 Description: Creates customizable category menus with 5-level depth
-Version: 3.1
+Version: 3.2
 Author: Name
 Text Domain: mlcm
 */

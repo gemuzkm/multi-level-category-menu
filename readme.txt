@@ -1,9 +1,9 @@
 === Multi-Level Category Menu ===
-Contributors: your-name
+Contributors: Name
 Tags: categories, menu, dropdown, widget
 Requires at least: 5.8
 Tested up to: 6.8
-Stable tag: 3.2
+Stable tag: 3.3
 
 Create multi-level category menus with 5-level depth.
 
