@@ -120,15 +120,17 @@ class Multi_Level_Category_Menu {
             $categories = get_categories([
                 'parent' => 0,
                 'exclude' => $excluded,
-                'fields' => 'id=>name',
                 'hide_empty' => false,
+                'orderby' => 'name', // Явное указание сортировки
+                'order' => 'ASC',    // Для единообразия с другими уровнями
+                'fields' => 'all'    // Получаем полные объекты вместо экранированных строк
             ]);
             
             $cache = [];
-            foreach ($categories as $id => $name) {
-                $category = get_category($id);
-                $cache[$id] = [
-                    'name' => strtoupper($name),
+            foreach ($categories as $category) {
+                $cache[$category->term_id] = [
+                    // Используем htmlspecialchars_decode для декодирования HTML-сущностей
+                    'name' => strtoupper(htmlspecialchars_decode($category->name)),
                     'slug' => $category->slug
                 ];
             }
