@@ -135,29 +135,6 @@ private function get_root_categories() {
     return $cache;
 }
 
-    /*
-    public function ajax_handler() {
-        check_ajax_referer('mlcm_nonce', 'security');
-        
-        $parent_id = isset($_POST['parent_id']) ? absint($_POST['parent_id']) : 0;
-        $cache_key = "mlcm_subcats_{$parent_id}";
-        
-        if (false === ($response = get_transient($cache_key))) {
-            $categories = get_categories([
-                'parent' => $parent_id,
-                'fields' => 'id=>name',
-                'orderby' => 'name',
-                'hide_empty' => true
-            ]);
-            
-            $response = array_map('strtoupper', $categories);
-            set_transient($cache_key, $response, WEEK_IN_SECONDS);
-        }
-        
-        wp_send_json_success($response);
-    }
-    */
-
     public function ajax_handler() {
         check_ajax_referer('mlcm_nonce', 'security');
         
