@@ -41,39 +41,19 @@ class Multi_Level_Category_Menu {
             ['wp-blocks', 'wp-i18n', 'wp-element', 'wp-components', 'wp-editor'],
             filemtime(plugin_dir_path(__FILE__) . 'assets/js/block-editor.js')
         );
-    
-        wp_register_style(
-            'mlcm-block-editor-style',
-            plugins_url('assets/css/block-editor.css', __FILE__),
-            [],
-            filemtime(plugin_dir_path(__FILE__) . 'assets/css/block-editor.css')
-        );
-    
+
         register_block_type('mlcm/menu-block', [
             'editor_script' => 'mlcm-block-editor',
-            'editor_style' => 'mlcm-block-editor-style',
-            'style' => 'mlcm-frontend',
             'render_callback' => [$this, 'render_gutenberg_block'],
             'attributes' => [
-                'layout' => ['type' => 'string', 'default' => 'vertical'],
-                'levels' => ['type' => 'number', 'default' => 3],
-                'showButton' => ['type' => 'boolean', 'default' => true],
-                'bgColor' => ['type' => 'string', 'default' => '#ffffff'],
-                'textColor' => ['type' => 'string', 'default' => '#333333'],
-                'fontSize' => ['type' => 'number', 'default' => 16],
-                'spacing' => ['type' => 'number', 'default' => 20],
-                'alignment' => ['type' => 'string', 'default' => 'left'],
-                'buttonLabel' => ['type' => 'string', 'default' => 'Go'],
-                'buttonWidth' => ['type' => 'number', 'default' => 100],
-                'buttonWidthUnit' => ['type' => 'string', 'default' => 'px'],
-                'buttonPosition' => ['type' => 'string', 'default' => 'after'],
-                'buttonBgColor' => ['type' => 'string', 'default' => '#0073aa'],
-                'buttonTextColor' => ['type' => 'string', 'default' => '#ffffff'],
-                'buttonBorderRadius' => ['type' => 'number', 'default' => 4],
-                'buttonBorderWidth' => ['type' => 'number', 'default' => 0],
-                'buttonBorderColor' => ['type' => 'string', 'default' => '#0073aa'],
-                'fontSizeUnit' => ['type' => 'string', 'default' => 'px'],
-                'gap' => ['type' => 'number', 'default' => 20]
+                'layout' => [
+                    'type' => 'string',
+                    'default' => 'vertical'
+                ],
+                'levels' => [
+                    'type' => 'number',
+                    'default' => 3
+                ]
             ]
         ]);
     }
@@ -81,80 +61,10 @@ class Multi_Level_Category_Menu {
     public function render_gutenberg_block($attributes) {
         $atts = shortcode_atts([
             'layout' => 'vertical',
-            'levels' => 3,
-            'show_button' => true,
-            'bg_color' => '#ffffff',
-            'text_color' => '#333333',
-            'font_size' => 16,
-            'spacing' => 20,
-            'alignment' => 'left',
-            'button_label' => __('Go', 'mlcm'),
-            'button_width' => 100,
-            'button_width_unit' => 'px',
-            'button_position' => 'after',
-            'button_bg_color' => '#0073aa',
-            'button_text_color' => '#ffffff',
-            'button_border_radius' => 4,
-            'button_border_width' => 0,
-            'button_border_color' => '#0073aa',
-            'font_size_unit' => 'px',
-            'gap' => 20
+            'levels' => 3
         ], $attributes);
 
-        $styles = [
-            'background-color' => $atts['bg_color'],
-            'color' => $atts['text_color'],
-            'font-size' => $atts['font_size'] . $atts['font_size_unit'],
-            'padding' => $atts['spacing'] . 'px',
-            'gap' => $atts['gap'] . 'px',
-            'justify-content' => $this->get_alignment_class($atts['alignment'])
-        ];
-
-        $inline_style = '';
-        foreach ($styles as $prop => $value) {
-            $inline_style .= "$prop:$value;";
-        }
-
-        return sprintf(
-            '<div class="mlcm-container %s" style="%s" data-levels="%d">%s%s%s</div>',
-            esc_attr($atts['layout']),
-            esc_attr($inline_style),
-            absint($atts['levels']),
-            ($atts['button_position'] === 'before' && $atts['show_button']) ? $this->render_button($atts) : '',
-            $this->generate_menu_html($atts),
-            ($atts['button_position'] === 'after' && $atts['show_button']) ? $this->render_button($atts) : ''
-        );
-    }
-
-    private function get_alignment_class($alignment) {
-        $map = [
-            'left' => 'flex-start',
-            'center' => 'center',
-            'right' => 'flex-end'
-        ];
-        return $map[$alignment] ?? 'flex-start';
-    }
-
-    private function render_button($atts) {
-        $button_styles = [
-            'background-color' => $atts['button_bg_color'],
-            'color' => $atts['button_text_color'],
-            'border-radius' => $atts['button_border_radius'] . 'px',
-            'border' => $atts['button_border_width'] . 'px solid ' . $atts['button_border_color'],
-            'width' => $atts['button_width'] . $atts['button_width_unit'],
-            'font-size' => $atts['font_size'] . $atts['font_size_unit']
-        ];
-
-        $inline_style = '';
-        foreach ($button_styles as $prop => $value) {
-            $inline_style .= "$prop:$value;";
-        }
-
-        return sprintf(
-            '<button type="button" class="mlcm-go-button" style="%s">%s</button>',
-            esc_attr($inline_style),
-            esc_html($atts['button_label'])
-        );
+        return $this->generate_menu_html($atts);
     }
 
     public function shortcode_handler($atts) {
@@ -186,18 +96,18 @@ class Multi_Level_Category_Menu {
     }
 
     private function render_select($level) {
-        $label = get_option("mlcm_level_{$level}_label", "Level {$level}");
-        $categories = ($level === 1) ? $this->get_root_categories() : [];
-        ?>
-        <select class="mlcm-select" data-level="<?= $level ?>" 
-                <?= $level > 1 ? 'disabled' : '' ?>>
-            <option value="-1"><?= esc_html($label) ?></option>
-            <?php foreach ($categories as $id => $name): ?>
-                <option value="<?= absint($id) ?>"><?= $name ?></option>
-            <?php endforeach; ?>
-        </select>
-        <?php
-    }
+    $label = get_option("mlcm_level_{$level}_label", "Level {$level}");
+    $categories = ($level === 1) ? $this->get_root_categories() : [];
+    ?>
+    <select class="mlcm-select" data-level="<?= $level ?>" 
+            <?= $level > 1 ? 'disabled' : '' ?>>
+        <option value="-1"><?= esc_html($label) ?></option>
+        <?php foreach ($categories as $id => $name): ?>
+            <option value="<?= absint($id) ?>"><?= $name ?></option>
+        <?php endforeach; ?>
+    </select>
+    <?php
+}
 
     private function get_root_categories() {
         $cache = get_transient('mlcm_root_cats');
@@ -267,7 +177,6 @@ class Multi_Level_Category_Menu {
                 WHERE 
                     tt.parent = %d 
                     AND tt.taxonomy = 'category'
-                    AND tt.count > 0  # Только непустые категории
                 ORDER BY t.name ASC
             ", $parent_id), OBJECT_K);
     
