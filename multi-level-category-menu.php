@@ -161,6 +161,11 @@ private function get_root_categories() {
     public function ajax_handler() {
         check_ajax_referer('mlcm_nonce', 'security');
         
+        //disablw wordpress components
+        wp_suspend_cache_addition(true);
+        remove_all_actions('plugins_loaded');
+        remove_all_filters('sanitize_title');
+
         $parent_id = absint($_POST['parent_id'] ?? 0);
         $cache_key = "mlcm_subcats_{$parent_id}";
         
