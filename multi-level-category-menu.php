@@ -3,7 +3,7 @@
 Plugin Name: Multi-Level Category Menu
 Description: Creates customizable category menus with 5-level depth
 Version: 3.1
-Author: Your Name
+Author: Name
 Text Domain: mlcm
 */
 
@@ -166,7 +166,6 @@ class Multi_Level_Category_Menu {
         if (false === ($response = get_transient($cache_key))) {
             global $wpdb;
     
-            // Прямой SQL-запрос для получения категорий
             $response = $wpdb->get_results($wpdb->prepare("
                 SELECT 
                     t.term_id as id, 
