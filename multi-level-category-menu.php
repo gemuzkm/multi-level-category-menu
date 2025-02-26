@@ -96,37 +96,44 @@ class Multi_Level_Category_Menu {
     }
 
     private function render_select($level) {
-    $label = get_option("mlcm_level_{$level}_label", "Level {$level}");
-    $categories = ($level === 1) ? $this->get_root_categories() : [];
-    ?>
-    <select class="mlcm-select" data-level="<?= $level ?>" 
-            <?= $level > 1 ? 'disabled' : '' ?>>
-        <option value="-1"><?= esc_html($label) ?></option>
-        <?php foreach ($categories as $id => $name): ?>
-            <option value="<?= absint($id) ?>"><?= $name ?></option>
-        <?php endforeach; ?>
-    </select>
-    <?php
-}
-
-    private function get_root_categories() {
-        $cache = get_transient('mlcm_root_cats');
-        
-        if (false === $cache) {
-            $excluded = array_map('absint', explode(',', get_option('mlcm_excluded_cats', '')));
-            $categories = get_categories([
-                'parent' => 0,
-                'exclude' => $excluded,
-                'fields' => 'id=>name',
-                'orderby' => 'name',
-                'hide_empty' => true
-            ]);
-            
-            $cache = array_map('strtoupper', $categories);
-            set_transient('mlcm_root_cats', $cache, WEEK_IN_SECONDS);
-        }
-        return $cache;
+        $label = get_option("mlcm_level_{$level}_label", "Level {$level}");
+        $categories = ($level === 1) ? $this->get_root_categories() : [];
+        $select_id = "mlcm-select-level-{$level}";
+        ?>
+        <select id="<?= esc_attr($select_id) ?>" class="mlcm-select" data-level="<?= $level ?>" 
+                <?= $level > 1 ? 'disabled' : '' ?>>
+            <option value="-1"><?= esc_html($label) ?></option>
+            <?php foreach ($categories as $id => $data): ?>
+                <option value="<?= absint($id) ?>" data-slug="<?= esc_attr($data['slug']) ?>">
+                    <?= esc_html($data['name']) ?>
+                </option>
+            <?php endforeach; ?>
+        </select>
+        <?php
     }
+
+private function get_root_categories() {
+    $cache = get_transient('mlcm_root_cats');
+    
+    if (false === $cache) {
+        $excluded = array_map('absint', explode(',', get_option('mlcm_excluded_cats', '')));
+        $categories = get_categories([
+            'parent' => 0,
+            'exclude' => $excluded,
+            'hide_empty' => false
+        ]);
+        
+        $cache = [];
+        foreach ($categories as $cat) {
+            $cache[$cat->term_id] = [
+                'name' => strtoupper($cat->name),
+                'slug' => $cat->slug
+            ];
+        }
+        set_transient('mlcm_root_cats', $cache, WEEK_IN_SECONDS);
+    }
+    return $cache;
+}
 
     /*
     public function ajax_handler() {
@@ -153,23 +160,18 @@ class Multi_Level_Category_Menu {
 
     public function ajax_handler() {
         check_ajax_referer('mlcm_nonce', 'security');
-    
-        // Отключаем ненужные компоненты WordPress для ускорения
-        wp_suspend_cache_addition(true);
-        remove_all_actions('plugins_loaded');
-        remove_all_filters('sanitize_title');
-    
+        
         $parent_id = absint($_POST['parent_id'] ?? 0);
         $cache_key = "mlcm_subcats_{$parent_id}";
-    
-        // Проверяем кеш
+        
         if (false === ($response = get_transient($cache_key))) {
             global $wpdb;
-    
+            
             $response = $wpdb->get_results($wpdb->prepare("
                 SELECT 
                     t.term_id as id, 
-                    t.name 
+                    t.name, 
+                    t.slug
                 FROM {$wpdb->terms} t
                 INNER JOIN {$wpdb->term_taxonomy} tt 
                     ON t.term_id = tt.term_id
@@ -178,17 +180,18 @@ class Multi_Level_Category_Menu {
                     AND tt.taxonomy = 'category'
                 ORDER BY t.name ASC
             ", $parent_id), OBJECT_K);
-    
-            // Сохраняем в кеше
+            
             if (!empty($response)) {
-                $response = array_map(function($item) {
-                    return strtoupper($item->name);
-                }, $response);
-                
+                foreach ($response as $id => $cat) {
+                    $response[$id] = [
+                        'name' => strtoupper($cat->name),
+                        'slug' => $cat->slug
+                    ];
+                }
                 set_transient($cache_key, $response, WEEK_IN_SECONDS);
             }
         }
-    
+        
         wp_send_json_success($response);
     }
 
