@@ -112,28 +112,30 @@ class Multi_Level_Category_Menu {
         <?php
     }
 
-private function get_root_categories() {
-    $cache = get_transient('mlcm_root_cats');
-    
-    if (false === $cache) {
-        $excluded = array_map('absint', explode(',', get_option('mlcm_excluded_cats', '')));
-        $categories = get_categories([
-            'parent' => 0,
-            'exclude' => $excluded,
-            'hide_empty' => false
-        ]);
+    private function get_root_categories() {
+        $cache = get_transient('mlcm_root_cats');
         
-        $cache = [];
-        foreach ($categories as $cat) {
-            $cache[$cat->term_id] = [
-                'name' => strtoupper($cat->name),
-                'slug' => $cat->slug
-            ];
+        if (false === $cache) {
+            $excluded = array_map('absint', explode(',', get_option('mlcm_excluded_cats', '')));
+            $categories = get_categories([
+                'parent' => 0,
+                'exclude' => $excluded,
+                'fields' => 'id=>name',
+                'hide_empty' => false,
+            ]);
+            
+            $cache = [];
+            foreach ($categories as $id => $name) {
+                $category = get_category($id);
+                $cache[$id] = [
+                    'name' => strtoupper($name),
+                    'slug' => $category->slug
+                ];
+            }
+            set_transient('mlcm_root_cats', $cache, WEEK_IN_SECONDS);
         }
-        set_transient('mlcm_root_cats', $cache, WEEK_IN_SECONDS);
+        return $cache;
     }
-    return $cache;
-}
 
     public function ajax_handler() {
         check_ajax_referer('mlcm_nonce', 'security');
