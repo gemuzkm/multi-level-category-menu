@@ -142,7 +142,7 @@ class Multi_Level_Category_Menu {
     public function ajax_handler() {
         check_ajax_referer('mlcm_nonce', 'security');
         
-        //disablw wordpress components
+        //disable wordpress components
         wp_suspend_cache_addition(true);
         remove_all_actions('plugins_loaded');
         remove_all_filters('sanitize_title');
@@ -187,6 +187,7 @@ class Multi_Level_Category_Menu {
         register_setting('mlcm_options', 'mlcm_excluded_cats');
         register_setting('mlcm_options', 'mlcm_menu_width');
         register_setting('mlcm_options', 'mlcm_show_button');
+        register_setting('mlcm_options', 'mlcm_use_category_base'); // Новая настройка
         
         for ($i = 1; $i <= 5; $i++) {
             register_setting('mlcm_options', "mlcm_level_{$i}_label");
@@ -215,6 +216,11 @@ class Multi_Level_Category_Menu {
         add_settings_field('mlcm_show_button', 'Show Go Button', function() {
             $show = get_option('mlcm_show_button', '0');
             echo '<label><input type="checkbox" name="mlcm_show_button" value="1" '.checked($show, '1', false).'> '.__('Enable Go button', 'mlcm').'</label>';
+        }, 'mlcm_options', 'mlcm_main');
+
+        add_settings_field('mlcm_use_category_base', 'Use Category Base', function() {
+            $use_base = get_option('mlcm_use_category_base', '1');
+            echo '<label><input type="checkbox" name="mlcm_use_category_base" value="1" '.checked($use_base, '1', false).'> '.__('Include "category" in URL', 'mlcm').'</label>';
         }, 'mlcm_options', 'mlcm_main');
 
         add_settings_field('mlcm_exclude', 'Excluded Categories', function() {
@@ -313,7 +319,8 @@ class Multi_Level_Category_Menu {
             'nonce' => wp_create_nonce('mlcm_nonce'),
             'labels' => array_map(function($i) {
                 return get_option("mlcm_level_{$i}_label", "Level {$i}");
-            }, range(1,5))
+            }, range(1,5)),
+            'use_category_base' => get_option('mlcm_use_category_base', '1') === '1', // Передача настройки
         ]);
     }
 

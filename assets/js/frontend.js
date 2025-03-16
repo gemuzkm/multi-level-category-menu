@@ -38,19 +38,7 @@ jQuery(function($) {
     });
 
     // Обработчик клика по кнопке
-    container.on('click', '.mlcm-go-button', function() {
-        const selected = container.find('.mlcm-select:enabled').filter(function() {
-            return $(this).val() !== '-1';
-        });
-        
-        if (selected.length === 0) return;
-        
-        const lastSelected = selected.last();
-        const slug = lastSelected.data('selected-slug');
-        if (slug) {
-            window.location = `/category/${slug}/`;
-        }
-    });
+    container.on('click', '.mlcm-go-button', redirectToCategory);
 
     // Сброс последующих уровней
     function resetLevels(currentLevel) {
@@ -65,10 +53,7 @@ jQuery(function($) {
     function loadSubcategories($select, level, parentId) {
         const maxLevels = container.data('levels');
         if (level >= maxLevels) {
-            const slug = $select.data('selected-slug');
-            if (slug) {
-                window.location = `/category/${slug}/`;
-            }
+            redirectToCategory();
             return;
         }
 
@@ -85,7 +70,11 @@ jQuery(function($) {
             },
             success: (response) => {
                 if (response.success) {
-                    updateNextLevel($select, level, response.data);
+                    if (Object.keys(response.data).length > 0) {
+                        updateNextLevel($select, level, response.data);
+                    } else {
+                        redirectToCategory();
+                    }
                 }
             }
         });
@@ -106,10 +95,33 @@ jQuery(function($) {
                     sortedEntries.map(([id, data]) => 
                         `<option value="${id}" data-slug="${data.slug}">${data.name}</option>`).join(''));
         } else {
-            const slug = $select.data('selected-slug');
-            if (slug) {
-                window.location = `/category/${slug}/`;
+            redirectToCategory();
+        }
+    }
+
+    // Получение полного пути выбранных категорий
+    function getSelectedPath() {
+        const selectedSlugs = [];
+        container.find('.mlcm-select').each(function() {
+            const val = $(this).val();
+            if (val !== '-1') {
+                const slug = $(this).find('option:selected').data('slug');
+                if (slug) {
+                    selectedSlugs.push(slug);
+                }
+            } else {
+                return false; // Прерываем цикл на первом невыбранном уровне
             }
+        });
+        return selectedSlugs.join('/');
+    }
+
+    // Перенаправление на страницу категории
+    function redirectToCategory() {
+        const path = getSelectedPath();
+        if (path) {
+            const base = mlcmVars.use_category_base ? '/category/' : '/';
+            window.location = `${base}${path}/`;
         }
     }
 
