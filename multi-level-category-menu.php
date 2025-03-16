@@ -34,6 +34,7 @@ class Multi_Level_Category_Menu {
         add_action('admin_enqueue_scripts', [$this, 'enqueue_admin_assets']);
     }
 
+    // Регистрация блока Gutenberg
     public function register_gutenberg_block() {
         wp_register_script(
             'mlcm-block-editor',
@@ -58,6 +59,7 @@ class Multi_Level_Category_Menu {
         ]);
     }
 
+    // Рендеринг блока на фронтенде
     public function render_gutenberg_block($attributes) {
         $atts = shortcode_atts([
             'layout' => 'vertical',
@@ -67,6 +69,7 @@ class Multi_Level_Category_Menu {
         return $this->generate_menu_html($atts);
     }
 
+    // Обработчик шорткода
     public function shortcode_handler($atts) {
         $atts = shortcode_atts([
             'layout' => get_option('mlcm_menu_layout', 'vertical'),
@@ -76,6 +79,7 @@ class Multi_Level_Category_Menu {
         return $this->generate_menu_html($atts);
     }
 
+    // Генерация HTML для меню
     private function generate_menu_html($atts) {
         $show_button = get_option('mlcm_show_button', '0') === '1';
         ob_start(); ?>
@@ -95,6 +99,7 @@ class Multi_Level_Category_Menu {
         <?php return ob_get_clean();
     }
 
+    // Рендеринг селекта для каждого уровня
     private function render_select($level) {
         $label = get_option("mlcm_level_{$level}_label", "Level {$level}");
         $categories = ($level === 1) ? $this->get_root_categories() : [];
@@ -112,6 +117,7 @@ class Multi_Level_Category_Menu {
         <?php
     }
 
+    // Получение корневых категорий
     private function get_root_categories() {
         $cache = get_transient('mlcm_root_cats');
         
@@ -121,15 +127,14 @@ class Multi_Level_Category_Menu {
                 'parent' => 0,
                 'exclude' => $excluded,
                 'hide_empty' => false,
-                'orderby' => 'name', // Явное указание сортировки
-                'order' => 'ASC',    // Для единообразия с другими уровнями
-                'fields' => 'all'    // Получаем полные объекты вместо экранированных строк
+                'orderby' => 'name',
+                'order' => 'ASC',
+                'fields' => 'all'
             ]);
             
             $cache = [];
             foreach ($categories as $category) {
                 $cache[$category->term_id] = [
-                    // Используем htmlspecialchars_decode для декодирования HTML-сущностей
                     'name' => strtoupper(htmlspecialchars_decode($category->name)),
                     'slug' => $category->slug
                 ];
@@ -139,10 +144,10 @@ class Multi_Level_Category_Menu {
         return $cache;
     }
 
+    // Обработчик AJAX для подкатегорий
     public function ajax_handler() {
         check_ajax_referer('mlcm_nonce', 'security');
         
-        //disable wordpress components
         wp_suspend_cache_addition(true);
         remove_all_actions('plugins_loaded');
         remove_all_filters('sanitize_title');
@@ -181,13 +186,14 @@ class Multi_Level_Category_Menu {
         wp_send_json_success($response);
     }
 
+    // Регистрация настроек
     public function register_settings() {
         register_setting('mlcm_options', 'mlcm_menu_layout');
         register_setting('mlcm_options', 'mlcm_initial_levels');
         register_setting('mlcm_options', 'mlcm_excluded_cats');
         register_setting('mlcm_options', 'mlcm_menu_width');
         register_setting('mlcm_options', 'mlcm_show_button');
-        register_setting('mlcm_options', 'mlcm_use_category_base'); // Новая настройка
+        register_setting('mlcm_options', 'mlcm_use_category_base');
         
         for ($i = 1; $i <= 5; $i++) {
             register_setting('mlcm_options', "mlcm_level_{$i}_label");
@@ -250,6 +256,7 @@ class Multi_Level_Category_Menu {
         }, 'mlcm_options', 'mlcm_main');
     }
 
+    // Очистка кэша категорий
     public function clear_related_cache($term_id) {
         $term = get_term($term_id);
         if ($term->parent === 0) {
@@ -259,6 +266,7 @@ class Multi_Level_Category_Menu {
         }
     }
 
+    // Очистка всего кэша
     public function clear_all_caches() {
         global $wpdb;
         delete_transient('mlcm_root_cats');
@@ -270,6 +278,7 @@ class Multi_Level_Category_Menu {
         return $result !== false;
     }
 
+    // Добавление страницы настроек в админку
     public function add_admin_menu() {
         add_options_page(
             'Category Menu Settings', 
@@ -280,6 +289,7 @@ class Multi_Level_Category_Menu {
         );
     }
 
+    // Страница настроек
     public function settings_page() {
         if (!current_user_can('manage_options')) return; ?>
         <div class="wrap">
@@ -295,11 +305,13 @@ class Multi_Level_Category_Menu {
         <?php
     }
 
+    // Регистрация виджета
     public function register_widget() {
         require_once __DIR__.'/includes/widget.php';
         register_widget('MLCM_Widget');
     }
 
+    // Подключение ресурсов для фронтенда
     public function enqueue_frontend_assets() {
         wp_enqueue_style(
             'mlcm-frontend', 
@@ -320,10 +332,11 @@ class Multi_Level_Category_Menu {
             'labels' => array_map(function($i) {
                 return get_option("mlcm_level_{$i}_label", "Level {$i}");
             }, range(1,5)),
-            'use_category_base' => get_option('mlcm_use_category_base', '1') === '1', // Передача настройки
+            'use_category_base' => get_option('mlcm_use_category_base', '1') === '1',
         ]);
     }
 
+    // Подключение ресурсов для редактора
     public function enqueue_block_editor_assets() {
         wp_enqueue_script(
             'mlcm-block-editor',
@@ -338,6 +351,7 @@ class Multi_Level_Category_Menu {
         ]);
     }
 
+    // Подключение ресурсов для админки
     public function enqueue_admin_assets($hook) {
         if ($hook === 'settings_page_mlcm-settings') {
             wp_enqueue_style('mlcm-admin', plugins_url('assets/css/admin.css', __FILE__));
@@ -364,6 +378,7 @@ class Multi_Level_Category_Menu {
 
 Multi_Level_Category_Menu::get_instance();
 
+// AJAX для очистки кэша
 add_action('wp_ajax_mlcm_clear_all_caches', function() {
     check_ajax_referer('mlcm_admin_nonce', 'security');
     try {
@@ -375,6 +390,7 @@ add_action('wp_ajax_mlcm_clear_all_caches', function() {
     wp_die();
 });
 
+// Добавление стилей в заголовок
 add_action('wp_head', function() {
     $width = get_option('mlcm_menu_width', 250);
     echo '<style>.mlcm-select { width: '.absint($width).'px; }</style>';
