@@ -185,7 +185,8 @@ class Multi_Level_Category_Menu {
         register_setting('mlcm_options', 'mlcm_container_gap');     // Расстояние между элементами
         register_setting('mlcm_options', 'mlcm_button_bg_color');   // Цвет фона кнопки
         register_setting('mlcm_options', 'mlcm_button_font_size');  // Размер шрифта кнопки
-        
+        register_setting('mlcm_options', 'mlcm_button_hover_bg_color'); // Hover кнопки
+
         // Остальные настройки
         register_setting('mlcm_options', 'mlcm_menu_layout');
         register_setting('mlcm_options', 'mlcm_initial_levels');
@@ -217,6 +218,22 @@ class Multi_Level_Category_Menu {
             $bg_color = get_option('mlcm_button_bg_color', '');
             echo '<input type="color" name="mlcm_button_bg_color" value="'.esc_attr($bg_color).'">';
         }, 'mlcm_options', 'mlcm_main');
+
+        // Поле в админке
+        add_settings_field('mlcm_button_hover_bg_color', 'Button Hover Background Color', function() {
+            $hover_bg_color = get_option('mlcm_button_hover_bg_color', '');
+            echo '<input type="color" name="mlcm_button_hover_bg_color" value="' . esc_attr($hover_bg_color) . '">';
+        }, 'mlcm_options', 'mlcm_main');
+
+        // Применение стиля на фронтенде
+        $button_hover_bg_color = get_option('mlcm_button_hover_bg_color', '');
+        $custom_css = '';
+        if (!empty($button_hover_bg_color)) {
+            $custom_css .= ".mlcm-go-button:hover { background: {$button_hover_bg_color}; }";
+        }
+        if (!empty($custom_css)) {
+            wp_add_inline_style('mlcm-frontend', $custom_css);
+        }
 
         // Поле для размера шрифта кнопки
         add_settings_field('mlcm_button_font_size', 'Button Font Size (rem)', function() {
@@ -308,7 +325,9 @@ class Multi_Level_Category_Menu {
         $container_gap = get_option('mlcm_container_gap', '');
         $button_bg_color = get_option('mlcm_button_bg_color', '');
         $button_font_size = get_option('mlcm_button_font_size', '');
-
+        // Получение значения настройки для hover
+        $button_hover_bg_color = get_option('mlcm_button_hover_bg_color', '');
+        
         // Генерация динамических стилей
         $custom_css = '';
         if (!empty($font_size)) {
@@ -322,6 +341,9 @@ class Multi_Level_Category_Menu {
         }
         if (!empty($button_font_size)) {
             $custom_css .= ".mlcm-go-button { font-size: {$button_font_size}rem; }";
+        }
+        if (!empty($button_hover_bg_color)) {
+            $custom_css .= ".mlcm-go-button:hover { background: {$button_hover_bg_color}; }";
         }
 
         // Добавление стилей, если они есть
