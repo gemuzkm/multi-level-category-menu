@@ -34,7 +34,6 @@ class Multi_Level_Category_Menu {
         add_action('admin_enqueue_scripts', [$this, 'enqueue_admin_assets']);
     }
 
-    // Регистрация блока Gutenberg
     public function register_gutenberg_block() {
         wp_register_script(
             'mlcm-block-editor',
@@ -59,7 +58,6 @@ class Multi_Level_Category_Menu {
         ]);
     }
 
-    // Рендеринг блока на фронтенде
     public function render_gutenberg_block($attributes) {
         $atts = shortcode_atts([
             'layout' => 'vertical',
@@ -69,7 +67,6 @@ class Multi_Level_Category_Menu {
         return $this->generate_menu_html($atts);
     }
 
-    // Обработчик шорткода
     public function shortcode_handler($atts) {
         $atts = shortcode_atts([
             'layout' => get_option('mlcm_menu_layout', 'vertical'),
@@ -79,7 +76,6 @@ class Multi_Level_Category_Menu {
         return $this->generate_menu_html($atts);
     }
 
-    // Генерация HTML для меню
     private function generate_menu_html($atts) {
         $show_button = get_option('mlcm_show_button', '0') === '1';
         ob_start(); ?>
@@ -99,7 +95,6 @@ class Multi_Level_Category_Menu {
         <?php return ob_get_clean();
     }
 
-    // Рендеринг селекта для каждого уровня
     private function render_select($level) {
         $label = get_option("mlcm_level_{$level}_label", "Level {$level}");
         $categories = ($level === 1) ? $this->get_root_categories() : [];
@@ -117,7 +112,6 @@ class Multi_Level_Category_Menu {
         <?php
     }
 
-    // Получение корневых категорий
     private function get_root_categories() {
         $cache = get_transient('mlcm_root_cats');
         
@@ -144,7 +138,6 @@ class Multi_Level_Category_Menu {
         return $cache;
     }
 
-    // Обработчик AJAX для подкатегорий
     public function ajax_handler() {
         check_ajax_referer('mlcm_nonce', 'security');
         
@@ -186,8 +179,14 @@ class Multi_Level_Category_Menu {
         wp_send_json_success($response);
     }
 
-    // Регистрация настроек
     public function register_settings() {
+        // Регистрация новых опций
+        register_setting('mlcm_options', 'mlcm_font_size');          // Размер шрифта меню
+        register_setting('mlcm_options', 'mlcm_container_gap');     // Расстояние между элементами
+        register_setting('mlcm_options', 'mlcm_button_bg_color');   // Цвет фона кнопки
+        register_setting('mlcm_options', 'mlcm_button_font_size');  // Размер шрифта кнопки
+        
+        // Остальные настройки
         register_setting('mlcm_options', 'mlcm_menu_layout');
         register_setting('mlcm_options', 'mlcm_initial_levels');
         register_setting('mlcm_options', 'mlcm_excluded_cats');
@@ -201,6 +200,31 @@ class Multi_Level_Category_Menu {
 
         add_settings_section('mlcm_main', 'Main Settings', null, 'mlcm_options');
 
+        // Поле для размера шрифта элементов меню
+        add_settings_field('mlcm_font_size', 'Font Size for Menu Items (rem)', function() {
+            $font_size = get_option('mlcm_font_size', '');
+            echo '<input type="number" step="0.1" min="0.5" max="5" name="mlcm_font_size" value="'.esc_attr($font_size).'">';
+        }, 'mlcm_options', 'mlcm_main');
+
+        // Поле для расстояния между элементами меню
+        add_settings_field('mlcm_container_gap', 'Gap Between Menu Items (px)', function() {
+            $gap = get_option('mlcm_container_gap', '');
+            echo '<input type="number" min="0" step="1" name="mlcm_container_gap" value="'.esc_attr($gap).'">';
+        }, 'mlcm_options', 'mlcm_main');
+
+        // Поле для цвета фона кнопки
+        add_settings_field('mlcm_button_bg_color', 'Button Background Color', function() {
+            $bg_color = get_option('mlcm_button_bg_color', '');
+            echo '<input type="color" name="mlcm_button_bg_color" value="'.esc_attr($bg_color).'">';
+        }, 'mlcm_options', 'mlcm_main');
+
+        // Поле для размера шрифта кнопки
+        add_settings_field('mlcm_button_font_size', 'Button Font Size (rem)', function() {
+            $font_size = get_option('mlcm_button_font_size', '');
+            echo '<input type="number" step="0.1" min="0.5" max="5" name="mlcm_button_font_size" value="'.esc_attr($font_size).'">';
+        }, 'mlcm_options', 'mlcm_main');
+
+        // Остальные поля
         add_settings_field('mlcm_layout', 'Menu Layout', function() {
             $layout = get_option('mlcm_menu_layout', 'vertical');
             echo '<select name="mlcm_menu_layout">
@@ -256,62 +280,6 @@ class Multi_Level_Category_Menu {
         }, 'mlcm_options', 'mlcm_main');
     }
 
-    // Очистка кэша категорий
-    public function clear_related_cache($term_id) {
-        $term = get_term($term_id);
-        if ($term->parent === 0) {
-            delete_transient('mlcm_root_cats');
-        } else {
-            delete_transient("mlcm_subcats_{$term->parent}");
-        }
-    }
-
-    // Очистка всего кэша
-    public function clear_all_caches() {
-        global $wpdb;
-        delete_transient('mlcm_root_cats');
-        $result = $wpdb->query(
-            "DELETE FROM $wpdb->options 
-            WHERE option_name LIKE '_transient_mlcm_subcats_%' 
-            OR option_name LIKE '_transient_timeout_mlcm_subcats_%'"
-        );
-        return $result !== false;
-    }
-
-    // Добавление страницы настроек в админку
-    public function add_admin_menu() {
-        add_options_page(
-            'Category Menu Settings', 
-            'Category Menu', 
-            'manage_options', 
-            'mlcm-settings', 
-            [$this, 'settings_page']
-        );
-    }
-
-    // Страница настроек
-    public function settings_page() {
-        if (!current_user_can('manage_options')) return; ?>
-        <div class="wrap">
-            <h1><?php esc_html_e('Category Menu Settings', 'mlcm') ?></h1>
-            <form action="options.php" method="post">
-                <?php
-                settings_fields('mlcm_options');
-                do_settings_sections('mlcm_options');
-                submit_button();
-                ?>
-            </form>
-        </div>
-        <?php
-    }
-
-    // Регистрация виджета
-    public function register_widget() {
-        require_once __DIR__.'/includes/widget.php';
-        register_widget('MLCM_Widget');
-    }
-
-    // Подключение ресурсов для фронтенда
     public function enqueue_frontend_assets() {
         wp_enqueue_style(
             'mlcm-frontend', 
@@ -334,9 +302,84 @@ class Multi_Level_Category_Menu {
             }, range(1,5)),
             'use_category_base' => get_option('mlcm_use_category_base', '1') === '1',
         ]);
+
+        // Получение значений настроек
+        $font_size = get_option('mlcm_font_size', '');
+        $container_gap = get_option('mlcm_container_gap', '');
+        $button_bg_color = get_option('mlcm_button_bg_color', '');
+        $button_font_size = get_option('mlcm_button_font_size', '');
+
+        // Генерация динамических стилей
+        $custom_css = '';
+        if (!empty($font_size)) {
+            $custom_css .= ".mlcm-select { font-size: {$font_size}rem; }";
+        }
+        if (!empty($container_gap)) {
+            $custom_css .= ".mlcm-container { gap: {$container_gap}px; }";
+        }
+        if (!empty($button_bg_color)) {
+            $custom_css .= ".mlcm-go-button { background: {$button_bg_color}; }";
+        }
+        if (!empty($button_font_size)) {
+            $custom_css .= ".mlcm-go-button { font-size: {$button_font_size}rem; }";
+        }
+
+        // Добавление стилей, если они есть
+        if (!empty($custom_css)) {
+            wp_add_inline_style('mlcm-frontend', $custom_css);
+        }
     }
 
-    // Подключение ресурсов для редактора
+    public function clear_related_cache($term_id) {
+        $term = get_term($term_id);
+        if ($term->parent === 0) {
+            delete_transient('mlcm_root_cats');
+        } else {
+            delete_transient("mlcm_subcats_{$term->parent}");
+        }
+    }
+
+    public function clear_all_caches() {
+        global $wpdb;
+        delete_transient('mlcm_root_cats');
+        $result = $wpdb->query(
+            "DELETE FROM $wpdb->options 
+            WHERE option_name LIKE '_transient_mlcm_subcats_%' 
+            OR option_name LIKE '_transient_timeout_mlcm_subcats_%'"
+        );
+        return $result !== false;
+    }
+
+    public function add_admin_menu() {
+        add_options_page(
+            'Category Menu Settings', 
+            'Category Menu', 
+            'manage_options', 
+            'mlcm-settings', 
+            [$this, 'settings_page']
+        );
+    }
+
+    public function settings_page() {
+        if (!current_user_can('manage_options')) return; ?>
+        <div class="wrap">
+            <h1><?php esc_html_e('Category Menu Settings', 'mlcm') ?></h1>
+            <form action="options.php" method="post">
+                <?php
+                settings_fields('mlcm_options');
+                do_settings_sections('mlcm_options');
+                submit_button();
+                ?>
+            </form>
+        </div>
+        <?php
+    }
+
+    public function register_widget() {
+        require_once __DIR__.'/includes/widget.php';
+        register_widget('MLCM_Widget');
+    }
+
     public function enqueue_block_editor_assets() {
         wp_enqueue_script(
             'mlcm-block-editor',
@@ -351,7 +394,6 @@ class Multi_Level_Category_Menu {
         ]);
     }
 
-    // Подключение ресурсов для админки
     public function enqueue_admin_assets($hook) {
         if ($hook === 'settings_page_mlcm-settings') {
             wp_enqueue_style('mlcm-admin', plugins_url('assets/css/admin.css', __FILE__));
@@ -378,7 +420,6 @@ class Multi_Level_Category_Menu {
 
 Multi_Level_Category_Menu::get_instance();
 
-// AJAX для очистки кэша
 add_action('wp_ajax_mlcm_clear_all_caches', function() {
     check_ajax_referer('mlcm_admin_nonce', 'security');
     try {
@@ -390,7 +431,6 @@ add_action('wp_ajax_mlcm_clear_all_caches', function() {
     wp_die();
 });
 
-// Добавление стилей в заголовок
 add_action('wp_head', function() {
     $width = get_option('mlcm_menu_width', 250);
     echo '<style>.mlcm-select { width: '.absint($width).'px; }</style>';
