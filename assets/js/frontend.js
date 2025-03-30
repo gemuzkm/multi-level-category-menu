@@ -1,7 +1,7 @@
 jQuery(function($) {
     const container = $('.mlcm-container');
 
-    // Удаляем дубликаты кнопок
+    // Remove duplicate buttons
     container.each(function() {
         const $buttons = $(this).find('.mlcm-go-button');
         if ($buttons.length > 1) {
@@ -9,7 +9,7 @@ jQuery(function($) {
         }
     });
 
-    // Применение динамических стилей
+    // Applying dynamic styles
     container.each(function() {
         const $cont = $(this);
         const gap = parseInt($cont.css('gap')) || 20;
@@ -18,7 +18,7 @@ jQuery(function($) {
         $cont[0].style.setProperty('--mlcm-font-size', fontSize);
     });
 
-    // Обработчик изменений в селектах
+    // Handler of changes in selections
     container.on('change', '.mlcm-select', function() {
         const $select = $(this);
         const level = $select.data('level');
@@ -31,16 +31,16 @@ jQuery(function($) {
             return;
         }
         
-        // Сохраняем slug для выбранной категории
+        // Save the slug for the selected category
         $select.data('selected-slug', slug);
         
         loadSubcategories($select, level, parentId);
     });
 
-    // Обработчик клика по кнопке
+    // Button click handler
     container.on('click', '.mlcm-go-button', redirectToCategory);
 
-    // Сброс последующих уровней
+    // Reset the next levels
     function resetLevels(currentLevel) {
         container.find('.mlcm-select').each(function() {
             if ($(this).data('level') > currentLevel) {
@@ -49,7 +49,7 @@ jQuery(function($) {
         });
     }
 
-    // Загрузка подкатегорий
+    // Loading subcategories
     function loadSubcategories($select, level, parentId) {
         const maxLevels = container.data('levels');
         if (level >= maxLevels) {
@@ -80,7 +80,7 @@ jQuery(function($) {
         });
     }
 
-    // Обновление следующего уровня
+    // Next level update
     function updateNextLevel($select, currentLevel, categories) {
         const nextLevel = currentLevel + 1;
         const $nextSelect = $(`.mlcm-select[data-level="${nextLevel}"]`);
@@ -93,39 +93,27 @@ jQuery(function($) {
             $nextSelect.prop('disabled', false)
                 .html(`<option value="-1">${label}</option>` + 
                     sortedEntries.map(([id, data]) => 
-                        `<option value="${id}" data-slug="${data.slug}">${data.name}</option>`).join(''));
+                        `<option value="${id}" data-slug="${data.slug}" data-url="${data.url}">${data.name}</option>`).join(''));
         } else {
             redirectToCategory();
         }
     }
 
-    // Получение полного пути выбранных категорий
-    function getSelectedPath() {
-        const selectedSlugs = [];
-        container.find('.mlcm-select').each(function() {
-            const val = $(this).val();
-            if (val !== '-1') {
-                const slug = $(this).find('option:selected').data('slug');
-                if (slug) {
-                    selectedSlugs.push(slug);
-                }
-            } else {
-                return false; // Прерываем цикл на первом невыбранном уровне
-            }
-        });
-        return selectedSlugs.join('/');
-    }
-
-    // Перенаправление на страницу категории
+    // Redirect to category page
     function redirectToCategory() {
-        const path = getSelectedPath();
-        if (path) {
-            const base = mlcmVars.use_category_base ? '/category/' : '/';
-            window.location = `${base}${path}/`;
+        const $lastSelect = container.find('.mlcm-select').filter(function() {
+            return $(this).val() !== '-1';
+        }).last();
+        
+        if ($lastSelect.length) {
+            const url = $lastSelect.find('option:selected').data('url');
+            if (url) {
+                window.location = url;
+            }
         }
     }
 
-    // Адаптация для мобильных устройств
+    // Adaptation for mobile devices
     function handleMobileLayout() {
         if (window.matchMedia('(max-width: 768px)').matches) {
             container.find('.mlcm-go-button').css({

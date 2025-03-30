@@ -18,6 +18,7 @@ Features:
 - Cache system
 - AJAX loading
 - Deletion in slug ‘category’
+- Selecting the root category (id) for menu generation
 
 
 == Installation ==

@@ -2,7 +2,7 @@
 /*
 Plugin Name: Multi-Level Category Menu
 Description: Creates customizable category menus with 5-level depth
-Version: 3.2
+Version: 3.4
 Author: Name
 Text Domain: mlcm
 */
@@ -103,8 +103,10 @@ class Multi_Level_Category_Menu {
         <select id="<?= esc_attr($select_id) ?>" class="mlcm-select" data-level="<?= $level ?>" 
                 <?= $level > 1 ? 'disabled' : '' ?>>
             <option value="-1"><?= esc_html($label) ?></option>
-            <?php foreach ($categories as $id => $data): ?>
-                <option value="<?= absint($id) ?>" data-slug="<?= esc_attr($data['slug']) ?>">
+            <?php foreach ($categories as $id => $data): 
+                $cat_link = get_category_link($id);
+            ?>
+                <option value="<?= absint($id) ?>" data-slug="<?= esc_attr($data['slug']) ?>" data-url="<?= esc_url($cat_link) ?>">
                     <?= esc_html($data['name']) ?>
                 </option>
             <?php endforeach; ?>
@@ -113,135 +115,136 @@ class Multi_Level_Category_Menu {
     }
 
     private function get_root_categories() {
-        $cache = get_transient('mlcm_root_cats');
+        $custom_root_id = get_option('mlcm_custom_root_id', '');
+        if (!empty($custom_root_id) && is_numeric($custom_root_id)) {
+            $cache_key = 'mlcm_subcats_' . absint($custom_root_id);
+            $cache = get_transient($cache_key);
+            if (false === $cache) {
+                $excluded = array_map('absint', explode(',', get_option('mlcm_excluded_cats', '')));
+                $categories = get_categories([
+                    'parent' => absint($custom_root_id),
+                    'exclude' => $excluded,
+                    'hide_empty' => false,
+                    'orderby' => 'name',
+                    'order' => 'ASC',
+                    'fields' => 'all'
+                ]);
+                $cache = [];
+                foreach ($categories as $category) {
+                    $cache[$category->term_id] = [
+                        'name' => strtoupper(htmlspecialchars_decode($category->name)),
+                        'slug' => $category->slug
+                    ];
+                }
+                set_transient($cache_key, $cache, WEEK_IN_SECONDS);
+            }
+            return $cache;
+        } else {
+            $cache_key = 'mlcm_root_cats';
+            $cache = get_transient($cache_key);
+            if (false === $cache) {
+                $excluded = array_map('absint', explode(',', get_option('mlcm_excluded_cats', '')));
+                $categories = get_categories([
+                    'parent' => 0,
+                    'exclude' => $excluded,
+                    'hide_empty' => false,
+                    'orderby' => 'name',
+                    'order' => 'ASC',
+                    'fields' => 'all'
+                ]);
+                $cache = [];
+                foreach ($categories as $category) {
+                    $cache[$category->term_id] = [
+                        'name' => strtoupper(htmlspecialchars_decode($category->name)),
+                        'slug' => $category->slug
+                    ];
+                }
+                set_transient($cache_key, $cache, WEEK_IN_SECONDS);
+            }
+            return $cache;
+        }
+    }
+
+    public function ajax_handler() {
+        check_ajax_referer('mlcm_nonce', 'security');
         
-        if (false === $cache) {
-            $excluded = array_map('absint', explode(',', get_option('mlcm_excluded_cats', '')));
+        $parent_id = absint($_POST['parent_id'] ?? 0);
+        $cache_key = "mlcm_subcats_{$parent_id}";
+        
+        if (false === ($response = get_transient($cache_key))) {
             $categories = get_categories([
-                'parent' => 0,
-                'exclude' => $excluded,
+                'parent' => $parent_id,
                 'hide_empty' => false,
                 'orderby' => 'name',
                 'order' => 'ASC',
                 'fields' => 'all'
             ]);
             
-            $cache = [];
+            $response = [];
             foreach ($categories as $category) {
-                $cache[$category->term_id] = [
-                    'name' => strtoupper(htmlspecialchars_decode($category->name)),
-                    'slug' => $category->slug
+                $response[$category->term_id] = [
+                    'name' => strtoupper($category->name),
+                    'slug' => $category->slug,
+                    'url' => get_category_link($category->term_id)
                 ];
             }
-            set_transient('mlcm_root_cats', $cache, WEEK_IN_SECONDS);
-        }
-        return $cache;
-    }
-
-    public function ajax_handler() {
-        check_ajax_referer('mlcm_nonce', 'security');
-        
-        wp_suspend_cache_addition(true);
-        remove_all_actions('plugins_loaded');
-        remove_all_filters('sanitize_title');
-
-        $parent_id = absint($_POST['parent_id'] ?? 0);
-        $cache_key = "mlcm_subcats_{$parent_id}";
-        
-        if (false === ($response = get_transient($cache_key))) {
-            global $wpdb;
-            
-            $response = $wpdb->get_results($wpdb->prepare("
-                SELECT 
-                    t.term_id as id, 
-                    t.name, 
-                    t.slug
-                FROM {$wpdb->terms} t
-                INNER JOIN {$wpdb->term_taxonomy} tt 
-                    ON t.term_id = tt.term_id
-                WHERE 
-                    tt.parent = %d 
-                    AND tt.taxonomy = 'category'
-                ORDER BY t.name ASC
-            ", $parent_id), OBJECT_K);
-            
-            if (!empty($response)) {
-                foreach ($response as $id => $cat) {
-                    $response[$id] = [
-                        'name' => strtoupper($cat->name),
-                        'slug' => $cat->slug
-                    ];
-                }
-                set_transient($cache_key, $response, WEEK_IN_SECONDS);
-            }
+            set_transient($cache_key, $response, WEEK_IN_SECONDS);
         }
         
         wp_send_json_success($response);
     }
 
     public function register_settings() {
-        // Регистрация новых опций
-        register_setting('mlcm_options', 'mlcm_font_size');          // Размер шрифта меню
-        register_setting('mlcm_options', 'mlcm_container_gap');     // Расстояние между элементами
-        register_setting('mlcm_options', 'mlcm_button_bg_color');   // Цвет фона кнопки
-        register_setting('mlcm_options', 'mlcm_button_font_size');  // Размер шрифта кнопки
-        register_setting('mlcm_options', 'mlcm_button_hover_bg_color'); // Hover кнопки
-
-        // Остальные настройки
+        register_setting('mlcm_options', 'mlcm_font_size');
+        register_setting('mlcm_options', 'mlcm_container_gap');
+        register_setting('mlcm_options', 'mlcm_button_bg_color');
+        register_setting('mlcm_options', 'mlcm_button_font_size');
+        register_setting('mlcm_options', 'mlcm_button_hover_bg_color');
         register_setting('mlcm_options', 'mlcm_menu_layout');
         register_setting('mlcm_options', 'mlcm_initial_levels');
         register_setting('mlcm_options', 'mlcm_excluded_cats');
         register_setting('mlcm_options', 'mlcm_menu_width');
         register_setting('mlcm_options', 'mlcm_show_button');
         register_setting('mlcm_options', 'mlcm_use_category_base');
-        
+        register_setting('mlcm_options', 'mlcm_custom_root_id');
+
         for ($i = 1; $i <= 5; $i++) {
             register_setting('mlcm_options', "mlcm_level_{$i}_label");
         }
 
         add_settings_section('mlcm_main', 'Main Settings', null, 'mlcm_options');
 
-        // Поле для размера шрифта элементов меню
         add_settings_field('mlcm_font_size', 'Font Size for Menu Items (rem)', function() {
             $font_size = get_option('mlcm_font_size', '');
             echo '<input type="number" step="0.1" min="0.5" max="5" name="mlcm_font_size" value="'.esc_attr($font_size).'">';
         }, 'mlcm_options', 'mlcm_main');
 
-        // Поле для расстояния между элементами меню
         add_settings_field('mlcm_container_gap', 'Gap Between Menu Items (px)', function() {
             $gap = get_option('mlcm_container_gap', '');
             echo '<input type="number" min="0" step="1" name="mlcm_container_gap" value="'.esc_attr($gap).'">';
         }, 'mlcm_options', 'mlcm_main');
 
-        // Поле для цвета фона кнопки
         add_settings_field('mlcm_button_bg_color', 'Button Background Color', function() {
             $bg_color = get_option('mlcm_button_bg_color', '');
             echo '<input type="color" name="mlcm_button_bg_color" value="'.esc_attr($bg_color).'">';
         }, 'mlcm_options', 'mlcm_main');
 
-        // Поле в админке
         add_settings_field('mlcm_button_hover_bg_color', 'Button Hover Background Color', function() {
             $hover_bg_color = get_option('mlcm_button_hover_bg_color', '');
-            echo '<input type="color" name="mlcm_button_hover_bg_color" value="' . esc_attr($hover_bg_color) . '">';
+            echo '<input type="color" name="mlcm_button_hover_bg_color" value="'.esc_attr($hover_bg_color).'">';
         }, 'mlcm_options', 'mlcm_main');
 
-        // Применение стиля на фронтенде
-        $button_hover_bg_color = get_option('mlcm_button_hover_bg_color', '');
-        $custom_css = '';
-        if (!empty($button_hover_bg_color)) {
-            $custom_css .= ".mlcm-go-button:hover { background: {$button_hover_bg_color}; }";
-        }
-        if (!empty($custom_css)) {
-            wp_add_inline_style('mlcm-frontend', $custom_css);
-        }
-
-        // Поле для размера шрифта кнопки
         add_settings_field('mlcm_button_font_size', 'Button Font Size (rem)', function() {
             $font_size = get_option('mlcm_button_font_size', '');
             echo '<input type="number" step="0.1" min="0.5" max="5" name="mlcm_button_font_size" value="'.esc_attr($font_size).'">';
         }, 'mlcm_options', 'mlcm_main');
 
-        // Остальные поля
+        add_settings_field('mlcm_custom_root_id', 'Custom Root Category ID', function() {
+            $custom_root_id = get_option('mlcm_custom_root_id', '');
+            echo '<input type="text" name="mlcm_custom_root_id" value="' . esc_attr($custom_root_id) . '">';
+            echo '<p class="description">Specify the ID of the category whose subcategories will be used as the first level of the menu. Leave blank to use root categories.</p>';
+        }, 'mlcm_options', 'mlcm_main');
+
         add_settings_field('mlcm_layout', 'Menu Layout', function() {
             $layout = get_option('mlcm_menu_layout', 'vertical');
             echo '<select name="mlcm_menu_layout">
@@ -320,15 +323,12 @@ class Multi_Level_Category_Menu {
             'use_category_base' => get_option('mlcm_use_category_base', '1') === '1',
         ]);
 
-        // Получение значений настроек
         $font_size = get_option('mlcm_font_size', '');
         $container_gap = get_option('mlcm_container_gap', '');
         $button_bg_color = get_option('mlcm_button_bg_color', '');
         $button_font_size = get_option('mlcm_button_font_size', '');
-        // Получение значения настройки для hover
         $button_hover_bg_color = get_option('mlcm_button_hover_bg_color', '');
         
-        // Генерация динамических стилей
         $custom_css = '';
         if (!empty($font_size)) {
             $custom_css .= ".mlcm-select { font-size: {$font_size}rem; }";
@@ -346,7 +346,6 @@ class Multi_Level_Category_Menu {
             $custom_css .= ".mlcm-go-button:hover { background: {$button_hover_bg_color}; }";
         }
 
-        // Добавление стилей, если они есть
         if (!empty($custom_css)) {
             wp_add_inline_style('mlcm-frontend', $custom_css);
         }
@@ -354,10 +353,16 @@ class Multi_Level_Category_Menu {
 
     public function clear_related_cache($term_id) {
         $term = get_term($term_id);
-        if ($term->parent === 0) {
-            delete_transient('mlcm_root_cats');
-        } else {
-            delete_transient("mlcm_subcats_{$term->parent}");
+        if ($term) {
+            delete_transient("mlcm_subcats_{$term->term_id}");
+            if ($term->parent != 0) {
+                delete_transient("mlcm_subcats_{$term->parent}");
+            } else {
+                $custom_root_id = get_option('mlcm_custom_root_id', '');
+                if (empty($custom_root_id)) {
+                    delete_transient('mlcm_root_cats');
+                }
+            }
         }
     }
 
