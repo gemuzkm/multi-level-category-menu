@@ -183,7 +183,7 @@ class Multi_Level_Category_Menu {
             $response = [];
             foreach ($categories as $category) {
                 $response[$category->term_id] = [
-                    'name' => strtoupper($category->name),
+                    'name' => strtoupper(htmlspecialchars_decode($category->name)),
                     'slug' => $category->slug,
                     'url' => get_category_link($category->term_id)
                 ];
