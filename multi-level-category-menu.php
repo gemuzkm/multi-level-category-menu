@@ -157,6 +157,11 @@ class Multi_Level_Category_Menu {
                     'order' => 'ASC',
                     'fields' => 'all'
                 ]);
+
+                usort($categories, function($a, $b) {
+                    return strcasecmp($a->name, $b->name);
+                });
+
                 $cache = [];
                 foreach ($categories as $category) {
                     $cache[$category->term_id] = [
