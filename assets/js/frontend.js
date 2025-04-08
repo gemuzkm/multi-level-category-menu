@@ -1,26 +1,49 @@
 jQuery(function($) {
-    const container = $('.mlcm-container');
+    // Cache DOM elements and configure settings
+    const $containers = $('.mlcm-container');
+    const settings = {
+        mobileBreakpoint: 768,
+        defaultGap: 20
+    };
 
-    // Remove duplicate buttons
-    container.each(function() {
-        const $buttons = $(this).find('.mlcm-go-button');
-        if ($buttons.length > 1) {
-            $buttons.slice(1).remove();
-        }
-    });
+    /**
+     * Initialize menu containers
+     * Sets up initial state and removes duplicate buttons
+     */
+    function initializeContainers() {
+        $containers.each(function() {
+            const $container = $(this);
+            
+            // Remove duplicate buttons (keep only first one)
+            const $buttons = $container.find('.mlcm-go-button');
+            if ($buttons.length > 1) {
+                $buttons.slice(1).remove();
+            }
 
-    // Applying dynamic styles
-    container.each(function() {
-        const $cont = $(this);
-        const gap = parseInt($cont.css('gap')) || 20;
-        const fontSize = $cont.css('font-size');
-        $cont[0].style.setProperty('--mlcm-gap', `${gap}px`);
-        $cont[0].style.setProperty('--mlcm-font-size', fontSize);
-    });
+            // Set container custom properties
+            setContainerProperties($container);
+        });
+    }
 
-    // Handler of changes in selections
-    container.on('change', '.mlcm-select', function() {
-        const $select = $(this);
+    /**
+     * Set container CSS custom properties
+     * @param {jQuery} $container - Container element
+     */
+    function setContainerProperties($container) {
+        const gap = parseInt($container.css('gap')) || settings.defaultGap;
+        const fontSize = $container.css('font-size');
+        
+        $container[0].style.setProperty('--mlcm-gap', `${gap}px`);
+        $container[0].style.setProperty('--mlcm-font-size', fontSize);
+    }
+
+    /**
+     * Handle select element changes
+     * Loads subcategories or triggers redirect
+     * @param {Event} event - Change event
+     */
+    function handleSelectChange(event) {
+        const $select = $(event.target);
         const level = $select.data('level');
         const selectedOption = $select.find('option:selected');
         const parentId = selectedOption.val();
@@ -31,27 +54,30 @@ jQuery(function($) {
             return;
         }
         
-        // Save the slug for the selected category
         $select.data('selected-slug', slug);
-        
         loadSubcategories($select, level, parentId);
-    });
+    }
 
-    // Button click handler
-    container.on('click', '.mlcm-go-button', redirectToCategory);
-
-    // Reset the next levels
+    /**
+     * Reset all levels after the current one
+     * @param {number} currentLevel - Current selection level
+     */
     function resetLevels(currentLevel) {
-        container.find('.mlcm-select').each(function() {
+        $containers.find('.mlcm-select').each(function() {
             if ($(this).data('level') > currentLevel) {
                 $(this).val('-1').prop('disabled', true);
             }
         });
     }
 
-    // Loading subcategories
+    /**
+     * Load subcategories via AJAX
+     * @param {jQuery} $select - Select element
+     * @param {number} level - Current level
+     * @param {number} parentId - Parent category ID
+     */
     function loadSubcategories($select, level, parentId) {
-        const maxLevels = container.data('levels');
+        const maxLevels = $containers.data('levels');
         if (level >= maxLevels) {
             redirectToCategory();
             return;
@@ -69,18 +95,21 @@ jQuery(function($) {
                 $select.nextAll('.mlcm-select').val('-1').prop('disabled', true);
             },
             success: (response) => {
-                if (response.success) {
-                    if (Object.keys(response.data).length > 0) {
-                        updateNextLevel($select, level, response.data);
-                    } else {
-                        redirectToCategory();
-                    }
+                if (response.success && Object.keys(response.data).length > 0) {
+                    updateNextLevel($select, level, response.data);
+                } else {
+                    redirectToCategory();
                 }
             }
         });
     }
 
-    // Next level update
+    /**
+     * Update next level select with new options
+     * @param {jQuery} $select - Current select element
+     * @param {number} currentLevel - Current level
+     * @param {Object} categories - Categories data
+     */
     function updateNextLevel($select, currentLevel, categories) {
         const nextLevel = currentLevel + 1;
         const $nextSelect = $(`.mlcm-select[data-level="${nextLevel}"]`);
@@ -90,18 +119,21 @@ jQuery(function($) {
             const sortedEntries = Object.entries(categories)
                 .sort((a, b) => a[1].name.localeCompare(b[1].name, undefined, { sensitivity: 'base' }));
             
-            $nextSelect.prop('disabled', false)
-                .html(`<option value="-1">${label}</option>` + 
-                    sortedEntries.map(([id, data]) => 
-                        `<option value="${id}" data-slug="${data.slug}" data-url="${data.url}">${data.name}</option>`).join(''));
-        } else {
-            redirectToCategory();
+            const options = sortedEntries.map(([id, data]) => 
+                `<option value="${id}" data-slug="${data.slug}" data-url="${data.url}">${data.name}</option>`
+            );
+
+            $nextSelect
+                .prop('disabled', false)
+                .html(`<option value="-1">${label}</option>${options.join('')}`);
         }
     }
 
-    // Redirect to category page
+    /**
+     * Redirect to the selected category URL
+     */
     function redirectToCategory() {
-        const $lastSelect = container.find('.mlcm-select').filter(function() {
+        const $lastSelect = $containers.find('.mlcm-select').filter(function() {
             return $(this).val() !== '-1';
         }).last();
         
@@ -113,16 +145,24 @@ jQuery(function($) {
         }
     }
 
-    // Adaptation for mobile devices
+    /**
+     * Handle mobile layout adjustments
+     */
     function handleMobileLayout() {
-        if (window.matchMedia('(max-width: 768px)').matches) {
-            container.find('.mlcm-go-button').css({
-                'width': '100%',
-                'margin': '10px 0 0 0'
-            });
-        }
+        const isMobile = window.matchMedia(`(max-width: ${settings.mobileBreakpoint}px)`).matches;
+        
+        $containers.find('.mlcm-go-button').css({
+            'width': isMobile ? '100%' : '',
+            'margin': isMobile ? '10px 0 0 0' : ''
+        });
     }
 
-    handleMobileLayout();
+    // Event Listeners
+    $containers.on('change', '.mlcm-select', handleSelectChange);
+    $containers.on('click', '.mlcm-go-button', redirectToCategory);
     $(window).on('resize', handleMobileLayout);
+
+    // Initialize
+    initializeContainers();
+    handleMobileLayout();
 });
