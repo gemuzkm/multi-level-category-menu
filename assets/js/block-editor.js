@@ -3,7 +3,7 @@
     const { InspectorControls } = wp.blockEditor;
     const { PanelBody, SelectControl, RangeControl } = wp.components;
     const { __ } = wp.i18n;
-    const { createElement: el } = wp.element; // Используем createElement для создания элементов
+    const { createElement: el } = wp.element;
 
     registerBlockType('mlcm/menu-block', {
         title: __('Category Menu', 'mlcm'),
@@ -25,7 +25,6 @@
             const { attributes, setAttributes } = props;
 
             return [
-                // Панель настроек в инспекторе
                 el(InspectorControls, null,
                     el(PanelBody, { title: __('Settings', 'mlcm') },
                         el(SelectControl, {
@@ -46,7 +45,6 @@
                         })
                     )
                 ),
-                // Предварительный просмотр блока в редакторе
                 el('div', { className: 'mlcm-block-preview' },
                     el('h3', null, __('Category Menu Preview', 'mlcm')),
                     el('p', null, __('Layout:', 'mlcm') + ' ' + attributes.layout),
@@ -56,7 +54,7 @@
         },
 
         save: function() {
-            return null; // Динамический блок
+            return null;
         }
     });
 })(window.wp);
