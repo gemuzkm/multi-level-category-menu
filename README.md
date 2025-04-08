@@ -1,8 +1,9 @@
 # Multi-Level Category Menu
 
-[![WordPress](https://img.shields.io/wordpress/v/multi-level-category-menu.svg)](https://wordpress.org/plugins/multi-level-category-menu/)
-[![PHP](https://img.shields.io/badge/PHP-7.4%2B-blue.svg)](https://php.net/)
-[![License](https://img.shields.io/badge/license-GPL--2.0%2B-green.svg)](https://www.gnu.org/licenses/gpl-2.0.html)
+![Version](https://img.shields.io/badge/version-3.4-blue.svg)
+![PHP Version](https://img.shields.io/badge/PHP-7.4+-purple.svg)
+![WordPress](https://img.shields.io/badge/WordPress-5.0+-green.svg)
+![License](https://img.shields.io/badge/license-GPL%20v2-yellow.svg)
 
 Create powerful and flexible multi-level category navigation menus with up to 5 levels of depth for WordPress.
 
