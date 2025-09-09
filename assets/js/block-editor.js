@@ -1,9 +1,9 @@
 (function(wp) {
     const { registerBlockType } = wp.blocks;
     const { InspectorControls } = wp.blockEditor;
-    const { PanelBody, SelectControl, RangeControl, ToggleControl } = wp.components;
+    const { PanelBody, SelectControl, RangeControl } = wp.components;
     const { __ } = wp.i18n;
-    const { createElement: el } = wp.element;
+    const { createElement: el } = wp.element; // Используем createElement для создания элементов
 
     registerBlockType('mlcm/menu-block', {
         title: __('Category Menu', 'mlcm'),
@@ -18,10 +18,6 @@
             levels: {
                 type: 'number',
                 default: 3
-            },
-            modal: {
-                type: 'boolean',
-                default: false
             }
         },
 
@@ -47,11 +43,6 @@
                             onChange: (newLevels) => setAttributes({ levels: newLevels }),
                             min: 1,
                             max: 5
-                        }),
-                        el(ToggleControl, {
-                            label: __('Use Modal Window', 'mlcm'),
-                            checked: attributes.modal,
-                            onChange: (modal) => setAttributes({ modal: modal })
                         })
                     )
                 ),
@@ -59,8 +50,7 @@
                 el('div', { className: 'mlcm-block-preview' },
                     el('h3', null, __('Category Menu Preview', 'mlcm')),
                     el('p', null, __('Layout:', 'mlcm') + ' ' + attributes.layout),
-                    el('p', null, __('Visible Levels:', 'mlcm') + ' ' + attributes.levels),
-                    el('p', null, __('Modal Window:', 'mlcm') + ' ' + (attributes.modal ? __('Yes', 'mlcm') : __('No', 'mlcm')))
+                    el('p', null, __('Visible Levels:', 'mlcm') + ' ' + attributes.levels)
                 )
             ];
         },

@@ -20,7 +20,7 @@
     border-radius: 4px;
     background: #fff;
     width: var(--mlcm-width, 250px);
-    font-size: 2rem;
+	font-size: 2rem;
 }
 
 .mlcm-select.initial-level {
@@ -40,7 +40,7 @@
     border-radius: 4px;
     cursor: pointer;
     white-space: nowrap;
-    font-size: 2rem;
+	font-size: 2rem;
 }
 
 .mlcm-go-button:hover {
@@ -57,93 +57,6 @@
     align-self: flex-start;
 }
 
-/* Модальное окно */
-.mlcm-modal {
-    position: fixed;
-    z-index: 10000;
-    left: 0;
-    top: 0;
-    width: 100%;
-    height: 100%;
-    background-color: rgba(0, 0, 0, 0.7);
-    opacity: 0;
-    visibility: hidden;
-    transition: opacity 0.3s, visibility 0.3s;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.mlcm-modal[aria-hidden="false"] {
-    opacity: 1;
-    visibility: visible;
-}
-
-.mlcm-modal-dialog {
-    position: relative;
-    width: 90%;
-    max-width: 600px;
-    max-height: 80vh;
-    background: #fff;
-    border-radius: 5px;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
-    overflow: hidden;
-}
-
-.mlcm-modal-close {
-    position: absolute;
-    top: 15px;
-    right: 15px;
-    z-index: 10;
-    background: transparent;
-    border: none;
-    font-size: 24px;
-    line-height: 1;
-    cursor: pointer;
-    color: #666;
-    padding: 0;
-    width: 30px;
-    height: 30px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.mlcm-modal-close:hover {
-    color: #000;
-}
-
-.mlcm-modal-content {
-    padding: 30px;
-}
-
-.mlcm-modal-content h2 {
-    margin-top: 0;
-    margin-bottom: 20px;
-    font-size: 1.5rem;
-    color: #333;
-}
-
-.mlcm-modal-body {
-    overflow-y: auto;
-    max-height: 60vh;
-}
-
-.mlcm-modal-toggle {
-    cursor: pointer;
-    padding: 10px 20px;
-    background: #0073aa;
-    color: white;
-    border: none;
-    border-radius: 4px;
-    font-size: 1rem;
-}
-
-.mlcm-modal-toggle:hover {
-    background: #005177;
-}
-
-/* Адаптация для мобильных */
 @media screen and (max-width: 768px) {
     .mlcm-container {
         flex-direction: column !important;
@@ -168,30 +81,6 @@
     .mlcm-level {
         width: 100% !important;
     }
-    
-    .mlcm-modal-dialog {
-        width: 95%;
-        margin: 20px;
-    }
-    
-    .mlcm-modal-content {
-        padding: 20px;
-    }
-}
-
-/* Анимация появления */
-@keyframes mlcmModalFadeIn {
-    from { opacity: 0; }
-    to { opacity: 1; }
-}
-
-@keyframes mlcmModalSlideIn {
-    from { transform: translateY(-50px); }
-    to { transform: translateY(0); }
-}
-
-.mlcm-modal[aria-hidden="false"] .mlcm-modal-dialog {
-    animation: mlcmModalSlideIn 0.3s ease-out;
 }
 
 .mlcm-block-preview {
