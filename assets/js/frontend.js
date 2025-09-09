@@ -108,10 +108,69 @@ jQuery(function($) {
         if ($lastSelect.length) {
             const url = $lastSelect.find('option:selected').data('url');
             if (url) {
+                // Закрываем все модальные окна перед переходом
+                $('.mlcm-modal').attr('aria-hidden', 'true');
+                document.body.style.overflow = ''; // Восстанавливаем скролл
                 window.location = url;
             }
         }
     }
+
+    // Модальное окно
+    function initMLCMModal() {
+        const modalToggles = document.querySelectorAll('.mlcm-modal-toggle');
+        const modals = document.querySelectorAll('.mlcm-modal');
+        
+        // Открытие модального окна
+        modalToggles.forEach(toggle => {
+            toggle.addEventListener('click', function(e) {
+                e.preventDefault();
+                const target = this.getAttribute('data-modal-target');
+                const modal = document.getElementById(target);
+                if (modal) {
+                    modal.setAttribute('aria-hidden', 'false');
+                    document.body.style.overflow = 'hidden'; // Блокируем скролл страницы
+                }
+            });
+        });
+        
+        // Закрытие модального окна
+        modals.forEach(modal => {
+            // Кнопка закрытия
+            const closeBtn = modal.querySelector('.mlcm-modal-close');
+            if (closeBtn) {
+                closeBtn.addEventListener('click', function() {
+                    modal.setAttribute('aria-hidden', 'true');
+                    document.body.style.overflow = ''; // Восстанавливаем скролл
+                });
+            }
+            
+            // Закрытие по клику вне контента
+            modal.addEventListener('click', function(e) {
+                if (e.target === this) {
+                    modal.setAttribute('aria-hidden', 'true');
+                    document.body.style.overflow = ''; // Восстанавливаем скролл
+                }
+            });
+            
+            // Закрытие по ESC
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'Escape') {
+                    modals.forEach(m => {
+                        if (m.getAttribute('aria-hidden') === 'false') {
+                            m.setAttribute('aria-hidden', 'true');
+                            document.body.style.overflow = ''; // Восстанавливаем скролл
+                        }
+                    });
+                }
+            });
+        });
+    }
+
+    // Инициализация при загрузке документа
+    document.addEventListener('DOMContentLoaded', function() {
+        initMLCMModal();
+    });
 
     // Adaptation for mobile devices
     function handleMobileLayout() {

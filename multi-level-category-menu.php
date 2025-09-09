@@ -1,8 +1,8 @@
 <?php
 /*
 Plugin Name: Multi-Level Category Menu
-Description: Creates customizable category menus with 5-level depth
-Version: 3.4
+Description: Creates customizable category menus with 5-level depth and modal window support
+Version: 3.5
 Author: Name
 Text Domain: mlcm
 */
@@ -21,6 +21,7 @@ class Multi_Level_Category_Menu {
 
     public function __construct() {
         add_shortcode('mlcm_menu', [$this, 'shortcode_handler']);
+        add_shortcode('mlcm_modal_button', [$this, 'modal_button_shortcode']);
         add_action('widgets_init', [$this, 'register_widget']);
         add_action('init', [$this, 'register_gutenberg_block']);
         add_action('wp_enqueue_scripts', [$this, 'enqueue_frontend_assets']);
@@ -32,6 +33,7 @@ class Multi_Level_Category_Menu {
         add_action('edited_category', [$this, 'clear_related_cache']);
         add_action('create_category', [$this, 'clear_related_cache']);
         add_action('admin_enqueue_scripts', [$this, 'enqueue_admin_assets']);
+        add_action('wp_footer', [$this, 'add_modal_to_footer']);
     }
 
     public function register_gutenberg_block() {
@@ -53,6 +55,10 @@ class Multi_Level_Category_Menu {
                 'levels' => [
                     'type' => 'number',
                     'default' => 3
+                ],
+                'modal' => [
+                    'type' => 'boolean',
+                    'default' => false
                 ]
             ]
         ]);
@@ -61,23 +67,70 @@ class Multi_Level_Category_Menu {
     public function render_gutenberg_block($attributes) {
         $atts = shortcode_atts([
             'layout' => 'vertical',
-            'levels' => 3
+            'levels' => 3,
+            'modal' => false
         ], $attributes);
 
+        if ($attributes['modal']) {
+            return $this->modal_button_shortcode(['button_text' => __('Browse Categories', 'mlcm')]);
+        }
+        
         return $this->generate_menu_html($atts);
     }
 
     public function shortcode_handler($atts) {
         $atts = shortcode_atts([
             'layout' => get_option('mlcm_menu_layout', 'vertical'),
-            'levels' => absint(get_option('mlcm_initial_levels', 3))
+            'levels' => absint(get_option('mlcm_initial_levels', 3)),
+            'modal' => false
         ], $atts);
 
+        // Если нужно отобразить как модальное окно
+        if (filter_var($atts['modal'], FILTER_VALIDATE_BOOLEAN)) {
+            return $this->modal_button_shortcode(['button_text' => __('Browse Categories', 'mlcm')]);
+        }
+        
         return $this->generate_menu_html($atts);
     }
 
-    private function generate_menu_html($atts) {
+    public function modal_button_shortcode($atts) {
+        $atts = shortcode_atts([
+            'button_text' => __('Open Category Menu', 'mlcm'),
+            'button_class' => ''
+        ], $atts);
+        
+        ob_start(); ?>
+        <button type="button" class="mlcm-modal-toggle <?php echo esc_attr($atts['button_class']); ?>" 
+                data-modal-target="mlcm-modal">
+            <?php echo esc_html($atts['button_text']); ?>
+        </button>
+        <?php
+        return ob_get_clean();
+    }
+
+    public function add_modal_to_footer() {
+        if (!get_option('mlcm_use_modal', '0') === '1') return;
+        
+        $layout = get_option('mlcm_menu_layout', 'vertical');
+        $levels = absint(get_option('mlcm_initial_levels', 3));
         $show_button = get_option('mlcm_show_button', '0') === '1';
+        ?>
+        <div id="mlcm-modal" class="mlcm-modal" aria-hidden="true">
+            <div class="mlcm-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="mlcm-modal-title">
+                <button class="mlcm-modal-close" aria-label="Close modal">×</button>
+                <div class="mlcm-modal-content">
+                    <h2 id="mlcm-modal-title"><?php _e('Category Menu', 'mlcm'); ?></h2>
+                    <div class="mlcm-modal-body">
+                        <?php echo $this->generate_menu_html(['layout' => $layout, 'levels' => $levels, 'show_button' => $show_button]); ?>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <?php
+    }
+
+    private function generate_menu_html($atts) {
+        $show_button = isset($atts['show_button']) ? $atts['show_button'] : (get_option('mlcm_show_button', '0') === '1');
         ob_start(); ?>
         <div class="mlcm-container <?php echo esc_attr($atts['layout']); ?>" 
              data-levels="<?php echo absint($atts['levels']); ?>">
@@ -217,6 +270,7 @@ class Multi_Level_Category_Menu {
         register_setting('mlcm_options', 'mlcm_show_button');
         register_setting('mlcm_options', 'mlcm_use_category_base');
         register_setting('mlcm_options', 'mlcm_custom_root_id');
+        register_setting('mlcm_options', 'mlcm_use_modal');
 
         for ($i = 1; $i <= 5; $i++) {
             register_setting('mlcm_options', "mlcm_level_{$i}_label");
@@ -276,6 +330,11 @@ class Multi_Level_Category_Menu {
         add_settings_field('mlcm_show_button', 'Show Go Button', function() {
             $show = get_option('mlcm_show_button', '0');
             echo '<label><input type="checkbox" name="mlcm_show_button" value="1" '.checked($show, '1', false).'> '.__('Enable Go button', 'mlcm').'</label>';
+        }, 'mlcm_options', 'mlcm_main');
+
+        add_settings_field('mlcm_use_modal', 'Use Modal Window', function() {
+            $use_modal = get_option('mlcm_use_modal', '0');
+            echo '<label><input type="checkbox" name="mlcm_use_modal" value="1" '.checked($use_modal, '1', false).'> '.__('Enable modal window display', 'mlcm').'</label>';
         }, 'mlcm_options', 'mlcm_main');
 
         add_settings_field('mlcm_use_category_base', 'Use Category Base', function() {
