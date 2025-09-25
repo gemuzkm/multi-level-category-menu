@@ -11,6 +11,7 @@ defined('ABSPATH') || exit;
 
 class Multi_Level_Category_Menu {
     private static $instance;
+    private $cache_group = 'mlcm_cache';
     
     public static function get_instance() {
         if (!isset(self::$instance)) {
@@ -117,19 +118,27 @@ class Multi_Level_Category_Menu {
     }
     
     /**
-     * ИЗМЕНЕНИЕ 1: Добавлено кеширование через транзиенты
+     * ИСПРАВЛЕНО: Добавлено объектное кеширование + исправлена сортировка
      */
     private function get_root_categories() {
         $custom_root_id = get_option('mlcm_custom_root_id', '');
-        if (!empty($custom_root_id) && is_numeric($custom_root_id)) {
-            $cache_key = 'mlcm_subcats_' . absint($custom_root_id);
-            $cache = get_transient($cache_key);
-            if (false === $cache) {
+        $parent_id = !empty($custom_root_id) && is_numeric($custom_root_id) ? absint($custom_root_id) : 0;
+        
+        // Объектное кеширование (Redis/Memcached) - проверяем сначала
+        $cache_key = "mlcm_cats_{$parent_id}";
+        $categories = wp_cache_get($cache_key, $this->cache_group);
+        
+        if (false === $categories) {
+            // Транзиенты - проверяем второй уровень кеша
+            $transient_key = "mlcm_cats_{$parent_id}";
+            $categories = get_transient($transient_key);
+            
+            if (false === $categories) {
+                // Получаем данные из базы и обрабатываем
                 $excluded = array_map('absint', explode(',', get_option('mlcm_excluded_cats', '')));
                 
-                // ИЗМЕНЕНИЕ 2: Добавлена сортировка в SQL запросе
-                $categories = get_categories([
-                    'parent' => absint($custom_root_id),
+                $wp_categories = get_categories([
+                    'parent' => $parent_id,
                     'exclude' => $excluded,
                     'hide_empty' => false,
                     'orderby' => 'name',
@@ -137,100 +146,105 @@ class Multi_Level_Category_Menu {
                     'fields' => 'all'
                 ]);
                 
-                // УБРАНО: usort() больше не нужен, так как сортировка происходит в SQL
-                $cache = [];
-                foreach ($categories as $category) {
-                    $cache[$category->term_id] = [
+                // ИСПРАВЛЕНО: Принудительная сортировка для гарантии правильного порядка
+                usort($wp_categories, function($a, $b) {
+                    return strcasecmp($a->name, $b->name);
+                });
+                
+                $categories = [];
+                foreach ($wp_categories as $category) {
+                    $categories[$category->term_id] = [
                         'name' => strtoupper(htmlspecialchars_decode($category->name)),
                         'slug' => $category->slug
                     ];
                 }
                 
-                // Кешируем на неделю
-                set_transient($cache_key, $cache, WEEK_IN_SECONDS);
+                // Сохраняем в транзиенты на неделю
+                set_transient($transient_key, $categories, WEEK_IN_SECONDS);
             }
-            return $cache;
-        } else {
-            $cache_key = 'mlcm_root_cats';
-            $cache = get_transient($cache_key);
-            if (false === $cache) {
-                $excluded = array_map('absint', explode(',', get_option('mlcm_excluded_cats', '')));
-                
-                // ИЗМЕНЕНИЕ 2: Добавлена сортировка в SQL запросе
-                $categories = get_categories([
-                    'parent' => 0,
-                    'exclude' => $excluded,
-                    'hide_empty' => false,
-                    'orderby' => 'name',
-                    'order' => 'ASC',
-                    'fields' => 'all'
-                ]);
-                
-                // УБРАНО: usort() больше не нужен, так как сортировка происходит в SQL
-                $cache = [];
-                foreach ($categories as $category) {
-                    $cache[$category->term_id] = [
-                        'name' => strtoupper(htmlspecialchars_decode($category->name)),
-                        'slug' => $category->slug
-                    ];
-                }
-                
-                // Кешируем на неделю
-                set_transient($cache_key, $cache, WEEK_IN_SECONDS);
-            }
-            return $cache;
+            
+            // Сохраняем в объектном кеше на час
+            wp_cache_set($cache_key, $categories, $this->cache_group, HOUR_IN_SECONDS);
         }
+        
+        return $categories;
     }
     
     /**
-     * ИЗМЕНЕНИЕ 1: Добавлено кеширование в AJAX обработчике
+     * ИСПРАВЛЕНО: Добавлено объектное кеширование + исправлена сортировка в AJAX
      */
     public function ajax_handler() {
         check_ajax_referer('mlcm_nonce', 'security');
         
         $parent_id = absint($_POST['parent_id'] ?? 0);
-        $cache_key = "mlcm_subcats_{$parent_id}";
         
-        // Проверяем кеш
-        if (false === ($response = get_transient($cache_key))) {
-            // ИЗМЕНЕНИЕ 2: Добавлена сортировка в SQL запросе
-            $categories = get_categories([
-                'parent' => $parent_id,
-                'hide_empty' => false,
-                'orderby' => 'name',
-                'order' => 'ASC',
-                'fields' => 'all'
-            ]);
+        // Объектное кеширование - проверяем сначала
+        $cache_key = "mlcm_subcats_{$parent_id}";
+        $response = wp_cache_get($cache_key, $this->cache_group);
+        
+        if (false === $response) {
+            // Транзиенты - проверяем второй уровень кеша
+            $transient_key = "mlcm_subcats_{$parent_id}";
+            $response = get_transient($transient_key);
             
-            $response = [];
-            foreach ($categories as $category) {
-                $response[$category->term_id] = [
-                    'name' => strtoupper(htmlspecialchars_decode($category->name)),
-                    'slug' => $category->slug,
-                    'url' => get_category_link($category->term_id)
-                ];
+            if (false === $response) {
+                // Получаем данные из базы
+                $categories = get_categories([
+                    'parent' => $parent_id,
+                    'hide_empty' => false,
+                    'orderby' => 'name',
+                    'order' => 'ASC',
+                    'fields' => 'all'
+                ]);
+                
+                // ИСПРАВЛЕНО: Принудительная сортировка для гарантии правильного порядка
+                usort($categories, function($a, $b) {
+                    return strcasecmp($a->name, $b->name);
+                });
+                
+                $response = [];
+                foreach ($categories as $category) {
+                    $response[$category->term_id] = [
+                        'name' => strtoupper(htmlspecialchars_decode($category->name)),
+                        'slug' => $category->slug,
+                        'url' => get_category_link($category->term_id)
+                    ];
+                }
+                
+                // Сохраняем в транзиенты на неделю
+                set_transient($transient_key, $response, WEEK_IN_SECONDS);
             }
             
-            // Кешируем на неделю
-            set_transient($cache_key, $response, WEEK_IN_SECONDS);
+            // Сохраняем в объектном кеше на час
+            wp_cache_set($cache_key, $response, $this->cache_group, HOUR_IN_SECONDS);
         }
         
         wp_send_json_success($response);
     }
     
     /**
-     * ИЗМЕНЕНИЕ 1: Очистка кеша при изменении категорий
+     * ДОБАВЛЕНО: Очистка объектного кеша + транзиентов при изменении категорий
      */
     public function clear_related_cache($term_id) {
         $term = get_term($term_id);
         if ($term) {
+            // Очищаем объектный кеш
+            wp_cache_delete("mlcm_cats_{$term->term_id}", $this->cache_group);
+            wp_cache_delete("mlcm_subcats_{$term->term_id}", $this->cache_group);
+            wp_cache_delete("mlcm_cats_{$term->parent}", $this->cache_group);
+            wp_cache_delete("mlcm_subcats_{$term->parent}", $this->cache_group);
+            
+            // Очищаем транзиенты
+            delete_transient("mlcm_cats_{$term->term_id}");
             delete_transient("mlcm_subcats_{$term->term_id}");
-            if ($term->parent != 0) {
-                delete_transient("mlcm_subcats_{$term->parent}");
-            } else {
+            delete_transient("mlcm_cats_{$term->parent}");
+            delete_transient("mlcm_subcats_{$term->parent}");
+            
+            if ($term->parent == 0) {
                 $custom_root_id = get_option('mlcm_custom_root_id', '');
                 if (empty($custom_root_id)) {
-                    delete_transient('mlcm_root_cats');
+                    wp_cache_delete('mlcm_cats_0', $this->cache_group);
+                    delete_transient('mlcm_cats_0');
                 }
             }
         }
@@ -331,7 +345,6 @@ class Multi_Level_Category_Menu {
             );
         }
         
-        // ИЗМЕНЕНИЕ 1: Добавляем кнопку очистки кеша
         add_settings_field('mlcm_cache', 'Cache Management', function() {
             echo '<button type="button" id="mlcm-clear-cache" class="button">Clear All Cache</button>';
             echo '<span class="spinner"></span>';
@@ -391,16 +404,24 @@ class Multi_Level_Category_Menu {
     }
     
     /**
-     * ИЗМЕНЕНИЕ 1: Функция очистки всех кешей
+     * ДОБАВЛЕНО: Функция очистки объектного кеша + транзиентов
      */
     public function clear_all_caches() {
         global $wpdb;
+        
+        // Очищаем объектный кеш (если доступен Redis/Memcached)
+        if (function_exists('wp_cache_flush_group')) {
+            wp_cache_flush_group($this->cache_group);
+        }
+        
+        // Очищаем транзиенты
         delete_transient('mlcm_root_cats');
         $result = $wpdb->query(
             "DELETE FROM $wpdb->options 
-             WHERE option_name LIKE '_transient_mlcm_subcats_%' 
-             OR option_name LIKE '_transient_timeout_mlcm_subcats_%'"
+             WHERE option_name LIKE '_transient_mlcm_%' 
+             OR option_name LIKE '_transient_timeout_mlcm_%'"
         );
+        
         return $result !== false;
     }
     
@@ -477,7 +498,7 @@ class Multi_Level_Category_Menu {
 
 Multi_Level_Category_Menu::get_instance();
 
-// ИЗМЕНЕНИЕ 1: AJAX обработчик для очистки кеша
+// AJAX обработчик для очистки кеша
 add_action('wp_ajax_mlcm_clear_all_caches', function() {
     check_ajax_referer('mlcm_admin_nonce', 'security');
     try {
