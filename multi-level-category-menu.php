@@ -49,12 +49,12 @@ class Multi_Level_Category_Menu {
             wp_schedule_event(time(), 'daily', 'mlcm_cleanup_transients');
         }
         
-        // ДОБАВЛЕНО: Создание индексов при активации
+        // Создание индексов при активации
         register_activation_hook(__FILE__, [$this, 'create_database_indexes']);
     }
     
     /**
-     * ДОБАВЛЕНО: Создание композитных индексов для оптимизации запросов
+     * Создание композитных индексов для оптимизации запросов
      */
     public function create_database_indexes() {
         global $wpdb;
@@ -265,6 +265,10 @@ class Multi_Level_Category_Menu {
                 'levels' => [
                     'type' => 'number',
                     'default' => 3
+                ],
+                'root_id' => [
+                    'type' => 'number',
+                    'default' => 0
                 ]
             ]
         ]);
@@ -273,12 +277,16 @@ class Multi_Level_Category_Menu {
     public function render_gutenberg_block($attributes) {
         $atts = shortcode_atts([
             'layout' => 'vertical',
-            'levels' => 3
+            'levels' => 3,
+            'root_id' => 0
         ], $attributes);
         
         return $this->generate_menu_html($atts);
     }
     
+    /**
+     * ИСПРАВЛЕНО: Добавлена поддержка параметра root_id в шорткоде
+     */
     public function shortcode_handler($atts) {
         do_action('mlcm_shortcode_executed');
         $GLOBALS['mlcm_needed'] = true;
@@ -290,19 +298,37 @@ class Multi_Level_Category_Menu {
         
         $atts = shortcode_atts([
             'layout' => get_option('mlcm_menu_layout', 'vertical'),
-            'levels' => absint(get_option('mlcm_initial_levels', 3))
+            'levels' => absint(get_option('mlcm_initial_levels', 3)),
+            'root_id' => 0  // ДОБАВЛЕНО: поддержка root_id в шорткоде
         ], $atts);
         
         return $this->generate_menu_html($atts);
     }
     
+    /**
+     * ИСПРАВЛЕНО: Добавлена поддержка root_id
+     */
     private function generate_menu_html($atts) {
         $show_button = get_option('mlcm_show_button', '0') === '1';
+        
+        // ИСПРАВЛЕНО: Определяем корневую категорию из параметров или настроек
+        $root_id = 0;
+        if (!empty($atts['root_id']) && is_numeric($atts['root_id'])) {
+            $root_id = absint($atts['root_id']);
+        } else {
+            $custom_root_id = get_option('mlcm_custom_root_id', '');
+            if (!empty($custom_root_id) && is_numeric($custom_root_id)) {
+                $root_id = absint($custom_root_id);
+            }
+        }
+        
         ob_start(); ?>
-        <div class="mlcm-container <?= esc_attr($atts['layout']) ?>" data-levels="<?= absint($atts['levels']) ?>">
+        <div class="mlcm-container <?= esc_attr($atts['layout']) ?>" 
+             data-levels="<?= absint($atts['levels']) ?>"
+             data-root-id="<?= $root_id ?>">
             <?php for($i = 1; $i <= $atts['levels']; $i++): ?>
                 <div class="mlcm-level" data-level="<?= $i ?>">
-                    <?php $this->render_select($i); ?>
+                    <?php $this->render_select($i, $root_id); ?>
                 </div>
             <?php endfor; ?>
             <?php if ($show_button): ?>
@@ -313,11 +339,18 @@ class Multi_Level_Category_Menu {
         return ob_get_clean();
     }
     
-    private function render_select($level) {
+    /**
+     * ИСПРАВЛЕНО: Добавлен параметр root_id и правильная логика для первого уровня
+     */
+    private function render_select($level, $root_id = 0) {
         $label = get_option("mlcm_level_{$level}_label", "Level {$level}");
         
-        // ОПТИМИЗИРОВАНО: Fragment Caching для каждого уровня
-        $categories = ($level === 1) ? $this->get_menu_fragment(1, 0) : [];
+        // ИСПРАВЛЕНО: Для первого уровня используем root_id
+        $categories = [];
+        if ($level === 1) {
+            $categories = $this->get_menu_fragment(1, $root_id);
+        }
+        
         $select_id = "mlcm-select-level-{$level}";
         ?>
         <select id="<?= $select_id ?>" 
@@ -339,7 +372,7 @@ class Multi_Level_Category_Menu {
     }
     
     /**
-     * ДОБАВЛЕНО: Fragment Caching - кеширование отдельных частей меню
+     * Fragment Caching - кеширование отдельных частей меню
      */
     public function get_menu_fragment($level, $parent_id = 0) {
         $fragment_key = "mlcm_fragment_{$level}_{$parent_id}";
@@ -352,7 +385,7 @@ class Multi_Level_Category_Menu {
             $fragment = get_transient($fragment_key);
             
             if (false === $fragment) {
-                // Строим фрагмент из оптимизированных данных
+                // ИСПРАВЛЕНО: Используем правильный parent_id
                 $fragment = $this->build_hierarchical_menu($parent_id);
                 
                 // Кешируем на 2 часа
@@ -367,8 +400,7 @@ class Multi_Level_Category_Menu {
     }
     
     /**
-     * ОПТИМИЗИРОВАНО: Единый SQL запрос для получения всей иерархии
-     * УБРАН usort() - сортировка в SQL
+     * ИСПРАВЛЕНО: Упрощенная логика - теперь parent_id используется напрямую
      */
     public function build_hierarchical_menu($parent_id = 0) {
         global $wpdb;
@@ -378,7 +410,7 @@ class Multi_Level_Category_Menu {
         $excluded = array_map('absint', array_filter(explode(',', get_option('mlcm_excluded_cats', ''))));
         $excluded_sql = !empty($excluded) ? 'AND t.term_id NOT IN (' . implode(',', $excluded) . ')' : '';
         
-        // ОПТИМИЗИРОВАННЫЙ SQL с индексами и правильной сортировкой
+        // ИСПРАВЛЕНО: Используем переданный parent_id напрямую
         $sql = $wpdb->prepare("
             SELECT t.term_id, t.name, t.slug, tt.parent, tt.term_taxonomy_id
             FROM {$wpdb->terms} t
@@ -399,7 +431,7 @@ class Multi_Level_Category_Menu {
         $execution_time = (microtime(true) - $start_time) * 1000;
         $this->log_query_performance("build_hierarchical_menu SQL (parent: {$parent_id})", $execution_time);
         
-        // УБРАН usort() - данные уже отсортированы в SQL
+        // Данные уже отсортированы в SQL
         $categories = [];
         foreach ($results as $category) {
             $categories[$category->term_id] = [
@@ -498,12 +530,17 @@ class Multi_Level_Category_Menu {
             delete_transient($key);
         }
         
-        // Если корневая категория
+        // Если корневая категория - очищаем все возможные корневые кеши
         if ($term->parent == 0) {
+            // Очищаем кеш для корня по умолчанию
+            wp_cache_delete('mlcm_fragment_1_0', $this->cache_group);
+            delete_transient('mlcm_fragment_1_0');
+            
+            // Очищаем кеш для custom root (если он равен этой категории)
             $custom_root_id = get_option('mlcm_custom_root_id', '');
-            if (empty($custom_root_id)) {
-                wp_cache_delete('mlcm_fragment_1_0', $this->cache_group);
-                delete_transient('mlcm_fragment_1_0');
+            if (!empty($custom_root_id) && absint($custom_root_id) == $term->term_id) {
+                wp_cache_delete("mlcm_fragment_1_{$custom_root_id}", $this->cache_group);
+                delete_transient("mlcm_fragment_1_{$custom_root_id}");
             }
         }
         
@@ -558,7 +595,28 @@ class Multi_Level_Category_Menu {
         add_settings_field('mlcm_custom_root_id', 'Custom Root Category ID', function() {
             $custom_root_id = get_option('mlcm_custom_root_id', '');
             echo '<input type="number" min="0" name="mlcm_custom_root_id" value="' . esc_attr($custom_root_id) . '" />';
-            echo '<p class="description">Specify the ID of the category whose subcategories will be used as the first level of the menu. Leave blank to use root categories.</p>';
+            echo '<p class="description">Specify the ID of the category whose subcategories will be used as the first level of the menu. Leave blank to use root categories (parent = 0).</p>';
+            
+            // ДОБАВЛЕНО: Показываем текущие корневые категории для справки
+            if (!empty($custom_root_id) && is_numeric($custom_root_id)) {
+                $category = get_category($custom_root_id);
+                if ($category && !is_wp_error($category)) {
+                    echo '<p class="description"><strong>Current root category:</strong> ' . esc_html($category->name) . ' (ID: ' . $category->term_id . ')</p>';
+                    
+                    // Показываем подкategории этой категории
+                    $subcategories = get_categories(['parent' => $custom_root_id, 'hide_empty' => false]);
+                    if (!empty($subcategories)) {
+                        echo '<p class="description"><strong>Subcategories:</strong> ';
+                        $sub_names = array_map(function($cat) { return $cat->name; }, $subcategories);
+                        echo esc_html(implode(', ', $sub_names));
+                        echo '</p>';
+                    } else {
+                        echo '<p class="description" style="color: orange;"><strong>Warning:</strong> This category has no subcategories.</p>';
+                    }
+                } else {
+                    echo '<p class="description" style="color: red;"><strong>Error:</strong> Category with ID ' . $custom_root_id . ' not found.</p>';
+                }
+            }
         }, 'mlcm_options', 'mlcm_main');
         
         add_settings_field('mlcm_layout', 'Menu Layout', function() {
@@ -611,6 +669,7 @@ class Multi_Level_Category_Menu {
             echo '<span class="spinner"></span>';
             echo '<p class="description">Clear all cached category data including fragments to force refresh</p>';
             echo '<p class="description"><strong>Performance Features:</strong> Database Indexes | Fragment Caching | Lazy Loading | Optimized SQL</p>';
+            echo '<p class="description"><strong>Shortcode Usage:</strong> [mlcm_menu root_id="2"] - to start from specific category</p>';
         }, 'mlcm_options', 'mlcm_main');
     }
     
