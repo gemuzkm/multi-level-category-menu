@@ -118,7 +118,9 @@ class Multi_Level_Category_Menu {
     }
     
     /**
-     * ИСПРАВЛЕНО: Добавлено объектное кеширование + исправлена сортировка
+     * ИЗМЕНЕНО: Увеличено время жизни кешей
+     * Объектный кеш: 1 неделя (вместо 1 часа)
+     * Транзиенты: 1 месяц (вместо 1 недели)
      */
     private function get_root_categories() {
         $custom_root_id = get_option('mlcm_custom_root_id', '');
@@ -146,7 +148,7 @@ class Multi_Level_Category_Menu {
                     'fields' => 'all'
                 ]);
                 
-                // ИСПРАВЛЕНО: Принудительная сортировка для гарантии правильного порядка
+                // Принудительная сортировка для гарантии правильного порядка
                 usort($wp_categories, function($a, $b) {
                     return strcasecmp($a->name, $b->name);
                 });
@@ -159,19 +161,21 @@ class Multi_Level_Category_Menu {
                     ];
                 }
                 
-                // Сохраняем в транзиенты на неделю
-                set_transient($transient_key, $categories, WEEK_IN_SECONDS);
+                // ИЗМЕНЕНО: Сохраняем в транзиенты на МЕСЯЦ (вместо недели)
+                set_transient($transient_key, $categories, MONTH_IN_SECONDS);
             }
             
-            // Сохраняем в объектном кеше на час
-            wp_cache_set($cache_key, $categories, $this->cache_group, HOUR_IN_SECONDS);
+            // ИЗМЕНЕНО: Сохраняем в объектном кеше на НЕДЕЛЮ (вместо часа)
+            wp_cache_set($cache_key, $categories, $this->cache_group, WEEK_IN_SECONDS);
         }
         
         return $categories;
     }
     
     /**
-     * ИСПРАВЛЕНО: Добавлено объектное кеширование + исправлена сортировка в AJAX
+     * ИЗМЕНЕНО: Увеличено время жизни кешей в AJAX
+     * Объектный кеш: 1 неделя (вместо 1 часа)
+     * Транзиенты: 1 месяц (вместо 1 недели)
      */
     public function ajax_handler() {
         check_ajax_referer('mlcm_nonce', 'security');
@@ -197,7 +201,7 @@ class Multi_Level_Category_Menu {
                     'fields' => 'all'
                 ]);
                 
-                // ИСПРАВЛЕНО: Принудительная сортировка для гарантии правильного порядка
+                // Принудительная сортировка для гарантии правильного порядка
                 usort($categories, function($a, $b) {
                     return strcasecmp($a->name, $b->name);
                 });
@@ -211,19 +215,19 @@ class Multi_Level_Category_Menu {
                     ];
                 }
                 
-                // Сохраняем в транзиенты на неделю
-                set_transient($transient_key, $response, WEEK_IN_SECONDS);
+                // ИЗМЕНЕНО: Сохраняем в транзиенты на МЕСЯЦ (вместо недели)
+                set_transient($transient_key, $response, MONTH_IN_SECONDS);
             }
             
-            // Сохраняем в объектном кеше на час
-            wp_cache_set($cache_key, $response, $this->cache_group, HOUR_IN_SECONDS);
+            // ИЗМЕНЕНО: Сохраняем в объектном кеше на НЕДЕЛЮ (вместо часа)
+            wp_cache_set($cache_key, $response, $this->cache_group, WEEK_IN_SECONDS);
         }
         
         wp_send_json_success($response);
     }
     
     /**
-     * ДОБАВЛЕНО: Очистка объектного кеша + транзиентов при изменении категорий
+     * Очистка объектного кеша + транзиентов при изменении категорий
      */
     public function clear_related_cache($term_id) {
         $term = get_term($term_id);
@@ -349,6 +353,7 @@ class Multi_Level_Category_Menu {
             echo '<button type="button" id="mlcm-clear-cache" class="button">Clear All Cache</button>';
             echo '<span class="spinner"></span>';
             echo '<p class="description">Clear all cached category data to force refresh</p>';
+            echo '<p class="description"><strong>Cache Settings:</strong> Object Cache: 1 week | Transients: 1 month</p>';
         }, 'mlcm_options', 'mlcm_main');
     }
     
@@ -404,7 +409,7 @@ class Multi_Level_Category_Menu {
     }
     
     /**
-     * ДОБАВЛЕНО: Функция очистки объектного кеша + транзиентов
+     * Функция очистки объектного кеша + транзиентов
      */
     public function clear_all_caches() {
         global $wpdb;
