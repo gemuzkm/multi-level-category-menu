@@ -1,8 +1,8 @@
 <?php
 /*
 Plugin Name: Multi-Level Category Menu
-Description: Creates customizable category menus with 5-level depth
-Version: 3.4
+Description: Creates customizable category menus with 5-level depth with advanced performance optimizations
+Version: 3.5
 Author: Name
 Text Domain: mlcm
 */
@@ -26,17 +26,21 @@ class Multi_Level_Category_Menu {
         add_action('widgets_init', [$this, 'register_widget']);
         add_action('init', [$this, 'register_gutenberg_block']);
         
-        // ИСПРАВЛЕНО: Более надежная условная загрузка ресурсов
+        // Условная загрузка ресурсов
         add_action('wp_enqueue_scripts', [$this, 'maybe_enqueue_assets'], 5);
-        add_action('wp_footer', [$this, 'ensure_assets_loaded']); // Fallback
+        add_action('wp_footer', [$this, 'ensure_assets_loaded']);
         
         add_action('enqueue_block_editor_assets', [$this, 'enqueue_block_editor_assets']);
         add_action('admin_init', [$this, 'register_settings']);
         add_action('admin_menu', [$this, 'add_admin_menu']);
-        add_action('wp_ajax_mlcm_get_subcategories', [$this, 'ajax_handler']);
-        add_action('wp_ajax_nopriv_mlcm_get_subcategories', [$this, 'ajax_handler']);
+        
+        // ОПТИМИЗИРОВАНО: Ленивая загрузка подменю через AJAX
+        add_action('wp_ajax_mlcm_get_subcategories', [$this, 'ajax_lazy_load_submenu']);
+        add_action('wp_ajax_nopriv_mlcm_get_subcategories', [$this, 'ajax_lazy_load_submenu']);
+        
         add_action('edited_category', [$this, 'clear_related_cache']);
         add_action('create_category', [$this, 'clear_related_cache']);
+        add_action('delete_category', [$this, 'clear_related_cache']);
         add_action('admin_enqueue_scripts', [$this, 'enqueue_admin_assets']);
         
         // Автоматическая очистка устаревших транзиентов
@@ -44,22 +48,56 @@ class Multi_Level_Category_Menu {
         if (!wp_next_scheduled('mlcm_cleanup_transients')) {
             wp_schedule_event(time(), 'daily', 'mlcm_cleanup_transients');
         }
+        
+        // ДОБАВЛЕНО: Создание индексов при активации
+        register_activation_hook(__FILE__, [$this, 'create_database_indexes']);
+    }
+    
+    /**
+     * ДОБАВЛЕНО: Создание композитных индексов для оптимизации запросов
+     */
+    public function create_database_indexes() {
+        global $wpdb;
+        
+        // Проверяем и создаем индексы только если их нет
+        $indexes_to_create = [
+            'idx_category_parent_order' => [
+                'table' => $wpdb->term_taxonomy,
+                'query' => "CREATE INDEX idx_category_parent_order ON {$wpdb->term_taxonomy} (parent, term_taxonomy_id, taxonomy)",
+                'check' => "SHOW INDEX FROM {$wpdb->term_taxonomy} WHERE Key_name = 'idx_category_parent_order'"
+            ],
+            'idx_category_hierarchy' => [
+                'table' => $wpdb->term_relationships,
+                'query' => "CREATE INDEX idx_category_hierarchy ON {$wpdb->term_relationships} (object_id, term_taxonomy_id)",
+                'check' => "SHOW INDEX FROM {$wpdb->term_relationships} WHERE Key_name = 'idx_category_hierarchy'"
+            ],
+            'idx_taxonomy_parent_name' => [
+                'table' => $wpdb->term_taxonomy,
+                'query' => "CREATE INDEX idx_taxonomy_parent_name ON {$wpdb->term_taxonomy} (taxonomy, parent)",
+                'check' => "SHOW INDEX FROM {$wpdb->term_taxonomy} WHERE Key_name = 'idx_taxonomy_parent_name'"
+            ]
+        ];
+        
+        foreach ($indexes_to_create as $index_name => $config) {
+            $existing = $wpdb->get_results($config['check']);
+            if (empty($existing)) {
+                $result = $wpdb->query($config['query']);
+                if ($result === false) {
+                    error_log("MLCM: Failed to create index {$index_name}: " . $wpdb->last_error);
+                } else {
+                    error_log("MLCM: Successfully created index {$index_name}");
+                }
+            }
+        }
     }
     
     /**
      * Правильная обработка HTML-entities с учетом utf8mb4_unicode_520_ci
      */
     private function sanitize_menu_title($title) {
-        // Декодируем HTML-entities только один раз с полной поддержкой UTF-8
         $decoded = html_entity_decode($title, ENT_QUOTES | ENT_HTML401, 'UTF-8');
-        
-        // Применяем санитизацию без повторного кодирования
         $sanitized = sanitize_text_field($decoded);
-        
-        // Убираем лишние пробелы и нормализуем Unicode
         $normalized = trim($sanitized);
-        
-        // Возвращаем в верхнем регистре как было в оригинале
         return mb_strtoupper($normalized, 'UTF-8');
     }
     
@@ -71,7 +109,6 @@ class Multi_Level_Category_Menu {
             do_action('qm/debug', "MLCM Query: {$query} - Time: {$execution_time}ms");
         }
         
-        // Дополнительно логируем медленные запросы
         if ($execution_time > 100) {
             error_log("MLCM Slow Query: {$query} - Time: {$execution_time}ms");
         }
@@ -103,12 +140,10 @@ class Multi_Level_Category_Menu {
             "Cleanup expired transients: {$deleted_timeouts} timeouts, {$deleted_transients} transients", 
             $execution_time
         );
-        
-        error_log("MLCM Cleanup: Removed {$deleted_timeouts} timeout entries and {$deleted_transients} transient entries in {$execution_time}ms");
     }
     
     /**
-     * ИСПРАВЛЕНО: Более надежная проверка необходимости загрузки ресурсов
+     * Условная загрузка ресурсов
      */
     public function maybe_enqueue_assets() {
         if ($this->should_load_assets_early()) {
@@ -117,54 +152,38 @@ class Multi_Level_Category_Menu {
         }
     }
     
-    /**
-     * ИСПРАВЛЕНО: Fallback для загрузки ресурсов в футере
-     */
     public function ensure_assets_loaded() {
-        // Если ресурсы еще не загружены, проверяем еще раз
         if (!$this->assets_enqueued && $this->should_load_assets_late()) {
             $this->enqueue_frontend_assets();
             $this->assets_enqueued = true;
-            
-            // Логируем поздную загрузку
-            error_log("MLCM: Assets loaded in footer fallback");
         }
     }
     
-    /**
-     * ИСПРАВЛЕНО: Ранняя проверка (консервативная)
-     */
     private function should_load_assets_early() {
         global $post;
         
-        // На страницах категорий и архивов загружаем всегда
         if (is_category() || is_archive()) {
             return true;
         }
         
-        // На главной странице загружаем всегда (может быть виджет)
         if (is_front_page() || is_home()) {
             return true;
         }
         
-        // Если есть активные виджеты, загружаем
         if ($this->is_menu_widget_active()) {
             return true;
         }
         
-        // На отдельных постах и страницах проверяем контент
         if (is_singular() && is_a($post, 'WP_Post')) {
-            // Проверяем шорткод в контенте
             if ($this->has_menu_shortcode($post->post_content)) {
                 return true;
             }
             
-            // Проверяем Gutenberg блоки
             if (has_block('mlcm/menu-block', $post)) {
                 return true;
             }
             
-            // ДОБАВЛЕНО: Проверяем кастомные поля
+            // Проверяем кастомные поля
             $custom_fields = get_post_meta($post->ID);
             foreach ($custom_fields as $field_value) {
                 if (is_array($field_value)) {
@@ -180,56 +199,11 @@ class Multi_Level_Category_Menu {
         return false;
     }
     
-    /**
-     * ИСПРАВЛЕНО: Поздняя проверка (в футере, более точная)
-     */
     private function should_load_assets_late() {
-        global $post, $wp_registered_sidebars;
-        
-        // ДОБАВЛЕНО: Проверяем содержимое всех активных виджетов
-        if (is_active_sidebar('sidebar-1') || is_active_sidebar('footer') || is_active_sidebar('header')) {
-            $sidebars_widgets = get_option('sidebars_widgets', array());
-            foreach ($sidebars_widgets as $sidebar_id => $widgets) {
-                if (is_array($widgets)) {
-                    foreach ($widgets as $widget_id) {
-                        if (strpos($widget_id, 'mlcm_widget') !== false) {
-                            return true;
-                        }
-                        
-                        // Проверяем текстовые виджеты на наличие шорткода
-                        if (strpos($widget_id, 'text') !== false) {
-                            $widget_text = get_option('widget_text');
-                            if (is_array($widget_text)) {
-                                foreach ($widget_text as $instance) {
-                                    if (isset($instance['text']) && $this->has_menu_shortcode($instance['text'])) {
-                                        return true;
-                                    }
-                                }
-                            }
-                        }
-                        
-                        // Проверяем кастомные HTML виджеты
-                        if (strpos($widget_id, 'custom_html') !== false) {
-                            $widget_html = get_option('widget_custom_html');
-                            if (is_array($widget_html)) {
-                                foreach ($widget_html as $instance) {
-                                    if (isset($instance['content']) && $this->has_menu_shortcode($instance['content'])) {
-                                        return true;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        
-        // ДОБАВЛЕНО: Проверяем, был ли шорткод выполнен
         if (did_action('mlcm_shortcode_executed')) {
             return true;
         }
         
-        // Проверяем глобальную переменную (может быть установлена в шаблоне)
         if (isset($GLOBALS['mlcm_needed']) && $GLOBALS['mlcm_needed']) {
             return true;
         }
@@ -237,20 +211,15 @@ class Multi_Level_Category_Menu {
         return false;
     }
     
-    /**
-     * ИСПРАВЛЕНО: Более надежная проверка шорткода
-     */
     private function has_menu_shortcode($content = '') {
         if (empty($content)) {
             return false;
         }
         
-        // Проверяем наличие шорткода разными способами
         if (has_shortcode($content, 'mlcm_menu')) {
             return true;
         }
         
-        // Проверяем через регулярное выражение (на случай если has_shortcode не сработает)
         if (preg_match('/\[mlcm_menu(?:\s[^\]]*)?]/', $content)) {
             return true;
         }
@@ -258,16 +227,11 @@ class Multi_Level_Category_Menu {
         return false;
     }
     
-    /**
-     * ИСПРАВЛЕНО: Более точная проверка активности виджета
-     */
     private function is_menu_widget_active() {
-        // Проверяем стандартным способом
         if (is_active_widget(false, false, 'mlcm_widget')) {
             return true;
         }
         
-        // ДОБАВЛЕНО: Дополнительная проверка через sidebars_widgets
         $sidebars_widgets = get_option('sidebars_widgets', array());
         foreach ($sidebars_widgets as $sidebar_id => $widgets) {
             if (is_array($widgets)) {
@@ -315,15 +279,10 @@ class Multi_Level_Category_Menu {
         return $this->generate_menu_html($atts);
     }
     
-    /**
-     * ИСПРАВЛЕНО: Добавлен маркер выполнения шорткода
-     */
     public function shortcode_handler($atts) {
-        // ДОБАВЛЕНО: Устанавливаем маркер что шорткод был выполнен
         do_action('mlcm_shortcode_executed');
         $GLOBALS['mlcm_needed'] = true;
         
-        // Если ресурсы еще не загружены, загружаем их сейчас
         if (!$this->assets_enqueued) {
             $this->enqueue_frontend_assets();
             $this->assets_enqueued = true;
@@ -356,7 +315,9 @@ class Multi_Level_Category_Menu {
     
     private function render_select($level) {
         $label = get_option("mlcm_level_{$level}_label", "Level {$level}");
-        $categories = ($level === 1) ? $this->get_root_categories() : [];
+        
+        // ОПТИМИЗИРОВАНО: Fragment Caching для каждого уровня
+        $categories = ($level === 1) ? $this->get_menu_fragment(1, 0) : [];
         $select_id = "mlcm-select-level-{$level}";
         ?>
         <select id="<?= $select_id ?>" 
@@ -378,149 +339,175 @@ class Multi_Level_Category_Menu {
     }
     
     /**
-     * Улучшено: Добавлено логирование производительности + исправлена обработка символов
+     * ДОБАВЛЕНО: Fragment Caching - кеширование отдельных частей меню
      */
-    private function get_root_categories() {
-        $start_time = microtime(true);
+    public function get_menu_fragment($level, $parent_id = 0) {
+        $fragment_key = "mlcm_fragment_{$level}_{$parent_id}";
         
-        $custom_root_id = get_option('mlcm_custom_root_id', '');
-        $parent_id = !empty($custom_root_id) && is_numeric($custom_root_id) ? absint($custom_root_id) : 0;
+        // Объектный кеш
+        $fragment = wp_cache_get($fragment_key, $this->cache_group);
         
-        // Объектное кеширование (Redis/Memcached) - проверяем сначала
-        $cache_key = "mlcm_cats_{$parent_id}";
-        $categories = wp_cache_get($cache_key, $this->cache_group);
-        
-        if (false === $categories) {
-            // Транзиенты - проверяем второй уровень кеша
-            $transient_key = "mlcm_cats_{$parent_id}";
-            $categories = get_transient($transient_key);
+        if (false === $fragment) {
+            // Транзиент
+            $fragment = get_transient($fragment_key);
             
-            if (false === $categories) {
-                // Получаем данные из базы и обрабатываем
-                $excluded = array_map('absint', explode(',', get_option('mlcm_excluded_cats', '')));
+            if (false === $fragment) {
+                // Строим фрагмент из оптимизированных данных
+                $fragment = $this->build_hierarchical_menu($parent_id);
                 
-                $wp_categories = get_categories([
-                    'parent' => $parent_id,
-                    'exclude' => $excluded,
-                    'hide_empty' => false,
-                    'orderby' => 'name',
-                    'order' => 'ASC',
-                    'fields' => 'all'
-                ]);
-                
-                // Принудительная сортировка для гарантии правильного порядка
-                usort($wp_categories, function($a, $b) {
-                    return strcasecmp($a->name, $b->name);
-                });
-                
-                $categories = [];
-                foreach ($wp_categories as $category) {
-                    // Используем новую функцию обработки символов
-                    $categories[$category->term_id] = [
-                        'name' => $this->sanitize_menu_title($category->name),
-                        'slug' => $category->slug
-                    ];
-                }
-                
-                // Сохраняем в транзиенты на месяц
-                set_transient($transient_key, $categories, MONTH_IN_SECONDS);
-                
-                $execution_time = (microtime(true) - $start_time) * 1000;
-                $this->log_query_performance("get_root_categories from DB (parent: {$parent_id})", $execution_time);
+                // Кешируем на 2 часа
+                set_transient($fragment_key, $fragment, 2 * HOUR_IN_SECONDS);
             }
             
-            // Сохраняем в объектном кеше на неделю
-            wp_cache_set($cache_key, $categories, $this->cache_group, WEEK_IN_SECONDS);
+            // Сохраняем в объектном кеше на час
+            wp_cache_set($fragment_key, $fragment, $this->cache_group, HOUR_IN_SECONDS);
+        }
+        
+        return $fragment;
+    }
+    
+    /**
+     * ОПТИМИЗИРОВАНО: Единый SQL запрос для получения всей иерархии
+     * УБРАН usort() - сортировка в SQL
+     */
+    public function build_hierarchical_menu($parent_id = 0) {
+        global $wpdb;
+        
+        $start_time = microtime(true);
+        
+        $excluded = array_map('absint', array_filter(explode(',', get_option('mlcm_excluded_cats', ''))));
+        $excluded_sql = !empty($excluded) ? 'AND t.term_id NOT IN (' . implode(',', $excluded) . ')' : '';
+        
+        // ОПТИМИЗИРОВАННЫЙ SQL с индексами и правильной сортировкой
+        $sql = $wpdb->prepare("
+            SELECT t.term_id, t.name, t.slug, tt.parent, tt.term_taxonomy_id
+            FROM {$wpdb->terms} t
+            INNER JOIN {$wpdb->term_taxonomy} tt ON t.term_id = tt.term_id
+            WHERE tt.taxonomy = 'category' 
+                AND tt.parent = %d 
+                {$excluded_sql}
+            ORDER BY t.name ASC
+        ", $parent_id);
+        
+        $results = $wpdb->get_results($sql);
+        
+        if ($wpdb->last_error) {
+            error_log("MLCM SQL Error: " . $wpdb->last_error);
+            return [];
+        }
+        
+        $execution_time = (microtime(true) - $start_time) * 1000;
+        $this->log_query_performance("build_hierarchical_menu SQL (parent: {$parent_id})", $execution_time);
+        
+        // УБРАН usort() - данные уже отсортированы в SQL
+        $categories = [];
+        foreach ($results as $category) {
+            $categories[$category->term_id] = [
+                'name' => $this->sanitize_menu_title($category->name),
+                'slug' => $category->slug
+            ];
         }
         
         return $categories;
     }
     
     /**
-     * Улучшено: Добавлено логирование производительности + исправлена обработка символов в AJAX
+     * ОПТИМИЗИРОВАНО: Ленивая загрузка подменю через AJAX
      */
-    public function ajax_handler() {
+    public function ajax_lazy_load_submenu() {
         check_ajax_referer('mlcm_nonce', 'security');
         
         $start_time = microtime(true);
         $parent_id = absint($_POST['parent_id'] ?? 0);
         
-        // Объектное кеширование - проверяем сначала
-        $cache_key = "mlcm_subcats_{$parent_id}";
-        $response = wp_cache_get($cache_key, $this->cache_group);
+        // Fragment cache для AJAX запросов
+        $cached_key = "mlcm_submenu_{$parent_id}";
         
-        if (false === $response) {
-            // Транзиенты - проверяем второй уровень кеша
-            $transient_key = "mlcm_subcats_{$parent_id}";
-            $response = get_transient($transient_key);
+        // Объектный кеш
+        $submenu = wp_cache_get($cached_key, $this->cache_group);
+        
+        if (false === $submenu) {
+            // Транзиент
+            $submenu = get_transient($cached_key);
             
-            if (false === $response) {
-                // Получаем данные из базы
-                $categories = get_categories([
-                    'parent' => $parent_id,
-                    'hide_empty' => false,
-                    'orderby' => 'name',
-                    'order' => 'ASC',
-                    'fields' => 'all'
-                ]);
+            if (false === $submenu) {
+                // Получаем данные оптимизированным запросом
+                $categories = $this->build_hierarchical_menu($parent_id);
                 
-                // Принудительная сортировка для гарантии правильного порядка
-                usort($categories, function($a, $b) {
-                    return strcasecmp($a->name, $b->name);
-                });
-                
-                $response = [];
-                foreach ($categories as $category) {
-                    // Используем новую функцию обработки символов
-                    $response[$category->term_id] = [
-                        'name' => $this->sanitize_menu_title($category->name),
-                        'slug' => $category->slug,
-                        'url' => get_category_link($category->term_id)
+                $submenu = [];
+                foreach ($categories as $id => $data) {
+                    $submenu[$id] = [
+                        'name' => $data['name'],
+                        'slug' => $data['slug'],
+                        'url' => get_category_link($id)
                     ];
                 }
                 
-                // Сохраняем в транзиенты на месяц
-                set_transient($transient_key, $response, MONTH_IN_SECONDS);
+                // Кешируем на 30 минут как рекомендовано
+                set_transient($cached_key, $submenu, 30 * MINUTE_IN_SECONDS);
                 
                 $execution_time = (microtime(true) - $start_time) * 1000;
-                $this->log_query_performance("ajax_handler from DB (parent: {$parent_id})", $execution_time);
+                $this->log_query_performance("ajax_lazy_load_submenu from DB (parent: {$parent_id})", $execution_time);
             }
             
-            // Сохраняем в объектном кеше на неделю
-            wp_cache_set($cache_key, $response, $this->cache_group, WEEK_IN_SECONDS);
+            // Сохраняем в объектном кеше на 15 минут
+            wp_cache_set($cached_key, $submenu, $this->cache_group, 15 * MINUTE_IN_SECONDS);
         }
         
-        wp_send_json_success($response);
+        wp_send_json_success($submenu);
     }
     
     /**
-     * Очистка объектного кеша + транзиентов при изменении категорий
+     * УЛУЧШЕНО: Очистка связанного кеша включая fragments
      */
     public function clear_related_cache($term_id) {
         $term = get_term($term_id);
-        if ($term) {
-            // Очищаем объектный кеш
-            wp_cache_delete("mlcm_cats_{$term->term_id}", $this->cache_group);
-            wp_cache_delete("mlcm_subcats_{$term->term_id}", $this->cache_group);
-            wp_cache_delete("mlcm_cats_{$term->parent}", $this->cache_group);
-            wp_cache_delete("mlcm_subcats_{$term->parent}", $this->cache_group);
-            
-            // Очищаем транзиенты
-            delete_transient("mlcm_cats_{$term->term_id}");
-            delete_transient("mlcm_subcats_{$term->term_id}");
-            delete_transient("mlcm_cats_{$term->parent}");
-            delete_transient("mlcm_subcats_{$term->parent}");
-            
-            if ($term->parent == 0) {
-                $custom_root_id = get_option('mlcm_custom_root_id', '');
-                if (empty($custom_root_id)) {
-                    wp_cache_delete('mlcm_cats_0', $this->cache_group);
-                    delete_transient('mlcm_cats_0');
-                }
-            }
-            
-            error_log("MLCM: Cleared cache for category {$term->name} (ID: {$term_id})");
+        if (!$term || is_wp_error($term)) {
+            return;
         }
+        
+        // Очищаем объектный кеш
+        $cache_keys_to_clear = [
+            "mlcm_cats_{$term->term_id}",
+            "mlcm_subcats_{$term->term_id}",
+            "mlcm_submenu_{$term->term_id}",
+            "mlcm_fragment_1_{$term->term_id}",
+            "mlcm_cats_{$term->parent}",
+            "mlcm_subcats_{$term->parent}",
+            "mlcm_submenu_{$term->parent}",
+            "mlcm_fragment_1_{$term->parent}"
+        ];
+        
+        foreach ($cache_keys_to_clear as $key) {
+            wp_cache_delete($key, $this->cache_group);
+        }
+        
+        // Очищаем транзиенты
+        $transient_keys_to_clear = [
+            "mlcm_cats_{$term->term_id}",
+            "mlcm_subcats_{$term->term_id}",
+            "mlcm_submenu_{$term->term_id}",
+            "mlcm_fragment_1_{$term->term_id}",
+            "mlcm_cats_{$term->parent}",
+            "mlcm_subcats_{$term->parent}",
+            "mlcm_submenu_{$term->parent}",
+            "mlcm_fragment_1_{$term->parent}"
+        ];
+        
+        foreach ($transient_keys_to_clear as $key) {
+            delete_transient($key);
+        }
+        
+        // Если корневая категория
+        if ($term->parent == 0) {
+            $custom_root_id = get_option('mlcm_custom_root_id', '');
+            if (empty($custom_root_id)) {
+                wp_cache_delete('mlcm_fragment_1_0', $this->cache_group);
+                delete_transient('mlcm_fragment_1_0');
+            }
+        }
+        
+        error_log("MLCM: Cleared cache for category {$term->name} (ID: {$term_id})");
     }
     
     public function register_settings() {
@@ -622,17 +609,12 @@ class Multi_Level_Category_Menu {
             echo '<button type="button" id="mlcm-clear-cache" class="button">Clear All Cache</button>';
             echo '<button type="button" id="mlcm-cleanup-transients" class="button" style="margin-left: 10px;">Cleanup Expired Transients</button>';
             echo '<span class="spinner"></span>';
-            echo '<p class="description">Clear all cached category data to force refresh</p>';
-            echo '<p class="description"><strong>Cache Settings:</strong> Object Cache: 1 week | Transients: 1 month | Auto cleanup: daily</p>';
-            echo '<p class="description"><strong>Assets Loading:</strong> Conditional loading with fallback for reliability</p>';
+            echo '<p class="description">Clear all cached category data including fragments to force refresh</p>';
+            echo '<p class="description"><strong>Performance Features:</strong> Database Indexes | Fragment Caching | Lazy Loading | Optimized SQL</p>';
         }, 'mlcm_options', 'mlcm_main');
     }
     
-    /**
-     * ИСПРАВЛЕНО: Всегда доступная функция загрузки ресурсов
-     */
     public function enqueue_frontend_assets() {
-        // Проверяем, не загружены ли уже ресурсы
         if (wp_style_is('mlcm-frontend', 'enqueued')) {
             return;
         }
@@ -688,20 +670,19 @@ class Multi_Level_Category_Menu {
     }
     
     /**
-     * Функция очистки всех кешей + мониторинг
+     * УЛУЧШЕНО: Функция очистки всех кешей включая fragments
      */
     public function clear_all_caches() {
         global $wpdb;
         
         $start_time = microtime(true);
         
-        // Очищаем объектный кеш (если доступен Redis/Memcached)
+        // Очищаем объектный кеш
         if (function_exists('wp_cache_flush_group')) {
             wp_cache_flush_group($this->cache_group);
         }
         
-        // Очищаем транзиенты
-        delete_transient('mlcm_root_cats');
+        // Очищаем все транзиенты включая fragments и submenu
         $result = $wpdb->query(
             "DELETE FROM $wpdb->options 
              WHERE option_name LIKE '_transient_mlcm_%' 
@@ -709,7 +690,7 @@ class Multi_Level_Category_Menu {
         );
         
         $execution_time = (microtime(true) - $start_time) * 1000;
-        $this->log_query_performance("clear_all_caches", $execution_time);
+        $this->log_query_performance("clear_all_caches including fragments", $execution_time);
         
         return $result !== false;
     }
@@ -788,7 +769,7 @@ class Multi_Level_Category_Menu {
 
 Multi_Level_Category_Menu::get_instance();
 
-// AJAX обработчик для очистки кеша
+// AJAX обработчики
 add_action('wp_ajax_mlcm_clear_all_caches', function() {
     check_ajax_referer('mlcm_admin_nonce', 'security');
     try {
@@ -800,7 +781,6 @@ add_action('wp_ajax_mlcm_clear_all_caches', function() {
     wp_die();
 });
 
-// AJAX обработчик для очистки устаревших транзиентов
 add_action('wp_ajax_mlcm_cleanup_transients', function() {
     check_ajax_referer('mlcm_admin_nonce', 'security');
     try {
