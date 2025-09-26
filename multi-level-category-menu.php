@@ -2,7 +2,7 @@
 /*
 Plugin Name: Multi-Level Category Menu
 Description: Creates customizable category menus with 5-level depth with advanced performance optimizations
-Version: 3.5
+Version: 3.6
 Author: Name
 Text Domain: mlcm
 */
@@ -26,10 +26,8 @@ class Multi_Level_Category_Menu {
         add_action('widgets_init', [$this, 'register_widget']);
         add_action('init', [$this, 'register_gutenberg_block']);
 
-        // ДОБАВЛЕНО: FlyingPress совместимость
         add_action('init', [$this, 'add_flyingpress_compatibility']);
 
-        // Условная загрузка ресурсов
         add_action('wp_enqueue_scripts', [$this, 'maybe_enqueue_assets'], 5);
         add_action('wp_footer', [$this, 'ensure_assets_loaded']);
 
@@ -37,7 +35,6 @@ class Multi_Level_Category_Menu {
         add_action('admin_init', [$this, 'register_settings']);
         add_action('admin_menu', [$this, 'add_admin_menu']);
 
-        // ОПТИМИЗИРОВАНО: Ленивая загрузка подменю через AJAX
         add_action('wp_ajax_mlcm_get_subcategories', [$this, 'ajax_lazy_load_submenu']);
         add_action('wp_ajax_nopriv_mlcm_get_subcategories', [$this, 'ajax_lazy_load_submenu']);
 
@@ -46,21 +43,15 @@ class Multi_Level_Category_Menu {
         add_action('delete_category', [$this, 'clear_related_cache']);
         add_action('admin_enqueue_scripts', [$this, 'enqueue_admin_assets']);
 
-        // Автоматическая очистка устаревших транзиентов
         add_action('mlcm_cleanup_transients', [$this, 'cleanup_expired_transients']);
         if (!wp_next_scheduled('mlcm_cleanup_transients')) {
             wp_schedule_event(time(), 'daily', 'mlcm_cleanup_transients');
         }
 
-        // Создание индексов при активации
         register_activation_hook(__FILE__, [$this, 'create_database_indexes']);
     }
 
-    /**
-     * ДОБАВЛЕНО: Фильтры совместимости с FlyingPress
-     */
     public function add_flyingpress_compatibility() {
-        // Исключение CSS от минификации FlyingPress
         add_filter('flying_press_exclude_from_minify:css', function ($exclude_keywords) {
             if (!is_array($exclude_keywords)) {
                 $exclude_keywords = [];
@@ -69,7 +60,6 @@ class Multi_Level_Category_Menu {
             return array_unique($exclude_keywords);
         });
 
-        // Исключение JS от минификации FlyingPress
         add_filter('flying_press_exclude_from_minify:js', function ($exclude_keywords) {
             if (!is_array($exclude_keywords)) {
                 $exclude_keywords = [];
@@ -79,13 +69,9 @@ class Multi_Level_Category_Menu {
         });
     }
 
-    /**
-     * Создание композитных индексов для оптимизации запросов
-     */
     public function create_database_indexes() {
         global $wpdb;
 
-        // Проверяем и создаем индексы только если их нет
         $indexes_to_create = [
             'idx_category_parent_order' => [
                 'table' => $wpdb->term_taxonomy,
@@ -117,9 +103,6 @@ class Multi_Level_Category_Menu {
         }
     }
 
-    /**
-     * Правильная обработка HTML-entities с учетом utf8mb4_unicode_520_ci
-     */
     private function sanitize_menu_title($title) {
         $decoded = html_entity_decode($title, ENT_QUOTES | ENT_HTML401, 'UTF-8');
         $sanitized = sanitize_text_field($decoded);
@@ -127,9 +110,6 @@ class Multi_Level_Category_Menu {
         return mb_strtoupper($normalized, 'UTF-8');
     }
 
-    /**
-     * Query Monitor интеграция для мониторинга производительности
-     */
     private function log_query_performance($query, $execution_time) {
         if (class_exists('QM_Collectors')) {
             do_action('qm/debug', "MLCM Query: {$query} - Time: {$execution_time}ms");
@@ -140,9 +120,6 @@ class Multi_Level_Category_Menu {
         }
     }
 
-    /**
-     * Автоматическая очистка устаревших транзиентов
-     */
     public function cleanup_expired_transients() {
         global $wpdb;
 
@@ -168,9 +145,6 @@ class Multi_Level_Category_Menu {
         );
     }
 
-    /**
-     * Условная загрузка ресурсов
-     */
     public function maybe_enqueue_assets() {
         if ($this->should_load_assets_early()) {
             $this->enqueue_frontend_assets();
@@ -209,7 +183,6 @@ class Multi_Level_Category_Menu {
                 return true;
             }
 
-            // Проверяем кастомные поля
             $custom_fields = get_post_meta($post->ID);
             foreach ($custom_fields as $field_value) {
                 if (is_array($field_value)) {
@@ -310,9 +283,6 @@ class Multi_Level_Category_Menu {
         return $this->generate_menu_html($atts);
     }
 
-    /**
-     * ИСПРАВЛЕНО: Добавлена поддержка параметра root_id в шорткоде
-     */
     public function shortcode_handler($atts) {
         do_action('mlcm_shortcode_executed');
         $GLOBALS['mlcm_needed'] = true;
@@ -325,19 +295,15 @@ class Multi_Level_Category_Menu {
         $atts = shortcode_atts([
             'layout' => get_option('mlcm_menu_layout', 'vertical'),
             'levels' => absint(get_option('mlcm_initial_levels', 3)),
-            'root_id' => 0 // ДОБАВЛЕНО: поддержка root_id в шорткоде
+            'root_id' => 0
         ], $atts);
 
         return $this->generate_menu_html($atts);
     }
 
-    /**
-     * ИСПРАВЛЕНО: Добавлена поддержка root_id
-     */
     private function generate_menu_html($atts) {
         $show_button = get_option('mlcm_show_button', '0') === '1';
 
-        // ИСПРАВЛЕНО: Определяем корневую категорию из параметров или настроек
         $root_id = 0;
         if (!empty($atts['root_id']) && is_numeric($atts['root_id'])) {
             $root_id = absint($atts['root_id']);
@@ -365,13 +331,9 @@ class Multi_Level_Category_Menu {
         return ob_get_clean();
     }
 
-    /**
-     * ИСПРАВЛЕНО: Добавлены правильные label для accessibility
-     */
     private function render_select($level, $root_id = 0) {
         $label = get_option("mlcm_level_{$level}_label", "Level {$level}");
 
-        // ИСПРАВЛЕНО: Для первого уровня используем root_id
         $categories = [];
         if ($level === 1) {
             $categories = $this->get_menu_fragment(1, $root_id);
@@ -401,37 +363,26 @@ class Multi_Level_Category_Menu {
         <?php
     }
 
-    /**
-     * Fragment Caching - кеширование отдельных частей меню
-     */
     public function get_menu_fragment($level, $parent_id = 0) {
         $fragment_key = "mlcm_fragment_{$level}_{$parent_id}";
 
-        // Объектный кеш
         $fragment = wp_cache_get($fragment_key, $this->cache_group);
 
         if (false === $fragment) {
-            // Транзиент
             $fragment = get_transient($fragment_key);
 
             if (false === $fragment) {
-                // ИСПРАВЛЕНО: Используем правильный parent_id
                 $fragment = $this->build_hierarchical_menu($parent_id);
 
-                // Кешируем на 2 часа
                 set_transient($fragment_key, $fragment, 2 * HOUR_IN_SECONDS);
             }
 
-            // Сохраняем в объектном кеше на час
             wp_cache_set($fragment_key, $fragment, $this->cache_group, HOUR_IN_SECONDS);
         }
 
         return $fragment;
     }
 
-    /**
-     * ИСПРАВЛЕНО: Упрощенная логика - теперь parent_id используется напрямую
-     */
     public function build_hierarchical_menu($parent_id = 0) {
         global $wpdb;
 
@@ -440,7 +391,6 @@ class Multi_Level_Category_Menu {
         $excluded = array_map('absint', array_filter(explode(',', get_option('mlcm_excluded_cats', ''))));
         $excluded_sql = !empty($excluded) ? 'AND t.term_id NOT IN (' . implode(',', $excluded) . ')' : '';
 
-        // ИСПРАВЛЕНО: Используем переданный parent_id напрямую
         $sql = $wpdb->prepare("
             SELECT t.term_id, t.name, t.slug, tt.parent, tt.term_taxonomy_id
             FROM {$wpdb->terms} t
@@ -461,7 +411,6 @@ class Multi_Level_Category_Menu {
         $execution_time = (microtime(true) - $start_time) * 1000;
         $this->log_query_performance("build_hierarchical_menu SQL (parent: {$parent_id})", $execution_time);
 
-        // Данные уже отсортированы в SQL
         $categories = [];
         foreach ($results as $category) {
             $categories[$category->term_id] = [
@@ -473,27 +422,20 @@ class Multi_Level_Category_Menu {
         return $categories;
     }
 
-    /**
-     * ОПТИМИЗИРОВАНО: Ленивая загрузка подменю через AJAX
-     */
     public function ajax_lazy_load_submenu() {
         check_ajax_referer('mlcm_nonce', 'security');
 
         $start_time = microtime(true);
         $parent_id = absint($_POST['parent_id'] ?? 0);
 
-        // Fragment cache для AJAX запросов
         $cached_key = "mlcm_submenu_{$parent_id}";
 
-        // Объектный кеш
         $submenu = wp_cache_get($cached_key, $this->cache_group);
 
         if (false === $submenu) {
-            // Транзиент
             $submenu = get_transient($cached_key);
 
             if (false === $submenu) {
-                // Получаем данные оптимизированным запросом
                 $categories = $this->build_hierarchical_menu($parent_id);
 
                 $submenu = [];
@@ -505,30 +447,24 @@ class Multi_Level_Category_Menu {
                     ];
                 }
 
-                // Кешируем на 30 минут как рекомендовано
                 set_transient($cached_key, $submenu, 30 * MINUTE_IN_SECONDS);
 
                 $execution_time = (microtime(true) - $start_time) * 1000;
                 $this->log_query_performance("ajax_lazy_load_submenu from DB (parent: {$parent_id})", $execution_time);
             }
 
-            // Сохраняем в объектном кеше на 15 минут
             wp_cache_set($cached_key, $submenu, $this->cache_group, 15 * MINUTE_IN_SECONDS);
         }
 
         wp_send_json_success($submenu);
     }
 
-    /**
-     * УЛУЧШЕНО: Очистка связанного кеша включая fragments
-     */
     public function clear_related_cache($term_id) {
         $term = get_term($term_id);
         if (!$term || is_wp_error($term)) {
             return;
         }
 
-        // Очищаем объектный кеш
         $cache_keys_to_clear = [
             "mlcm_cats_{$term->term_id}",
             "mlcm_subcats_{$term->term_id}",
@@ -544,7 +480,6 @@ class Multi_Level_Category_Menu {
             wp_cache_delete($key, $this->cache_group);
         }
 
-        // Очищаем транзиенты
         $transient_keys_to_clear = [
             "mlcm_cats_{$term->term_id}",
             "mlcm_subcats_{$term->term_id}",
@@ -560,13 +495,10 @@ class Multi_Level_Category_Menu {
             delete_transient($key);
         }
 
-        // Если корневая категория - очищаем все возможные корневые кеши
         if ($term->parent == 0) {
-            // Очищаем кеш для корня по умолчанию
             wp_cache_delete('mlcm_fragment_1_0', $this->cache_group);
             delete_transient('mlcm_fragment_1_0');
 
-            // Очищаем кеш для custom root (если он равен этой категории)
             $custom_root_id = get_option('mlcm_custom_root_id', '');
             if (!empty($custom_root_id) && absint($custom_root_id) == $term->term_id) {
                 wp_cache_delete("mlcm_fragment_1_{$custom_root_id}", $this->cache_group);
@@ -627,13 +559,11 @@ class Multi_Level_Category_Menu {
             echo '<input type="number" name="mlcm_custom_root_id" value="' . esc_attr($custom_root_id) . '" placeholder="0" />';
             echo '<p class="description">Specify the ID of the category whose subcategories will be used as the first level of the menu. Leave blank to use root categories (parent = 0).</p>';
 
-            // ДОБАВЛЕНО: Показываем текущие корневые категории для справки
             if (!empty($custom_root_id) && is_numeric($custom_root_id)) {
                 $category = get_category($custom_root_id);
                 if ($category && !is_wp_error($category)) {
                     echo '<p><strong>Current root category:</strong> ' . esc_html($category->name) . ' (ID: ' . $category->term_id . ')</p>';
 
-                    // Показываем подкategории этой категории
                     $subcategories = get_categories(['parent' => $custom_root_id, 'hide_empty' => false]);
                     if (!empty($subcategories)) {
                         echo '<p><strong>Subcategories:</strong> ';
@@ -761,20 +691,15 @@ class Multi_Level_Category_Menu {
         }
     }
 
-    /**
-     * УЛУЧШЕНО: Функция очистки всех кешей включая fragments
-     */
     public function clear_all_caches() {
         global $wpdb;
 
         $start_time = microtime(true);
 
-        // Очищаем объектный кеш
         if (function_exists('wp_cache_flush_group')) {
             wp_cache_flush_group($this->cache_group);
         }
 
-        // Очищаем все транзиенты включая fragments и submenu
         $result = $wpdb->query(
             "DELETE FROM $wpdb->options 
              WHERE option_name LIKE '_transient_mlcm_%' 
@@ -859,7 +784,6 @@ class Multi_Level_Category_Menu {
 
 Multi_Level_Category_Menu::get_instance();
 
-// AJAX обработчики
 add_action('wp_ajax_mlcm_clear_all_caches', function() {
     check_ajax_referer('mlcm_admin_nonce', 'security');
     try {
