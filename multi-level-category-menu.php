@@ -5,7 +5,6 @@
  * Description: Creates customizable category menus with 5-level depth featuring advanced performance optimizations, AJAX lazy loading, responsive design, and accessibility compliance
  * Version: 3.6
  * Author: Name
- * Author URI: https://github.com/gemuzkm
  * Text Domain: mlcm
  * Domain Path: /languages
  * Requires at least: 5.8
