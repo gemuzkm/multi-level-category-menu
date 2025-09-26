@@ -1,87 +1,116 @@
 <?php
+/**
+ * Multi-Level Category Menu Widget
+ * 
+ * Provides WordPress widget functionality for displaying category menus
+ * in sidebars and widget areas with customizable settings.
+ * 
+ * @package Multi_Level_Category_Menu
+ * @since 3.0
+ */
+
+// Exit if accessed directly - security measure
 defined('ABSPATH') || exit;
 
 /**
- * ИСПРАВЛЕНО: Правильная структура виджета WordPress
+ * MLCM Widget Class
+ * 
+ * Creates a WordPress widget for displaying multi-level category menus
+ * with options for title, layout, levels, and button display.
+ * 
+ * @extends WP_Widget
  */
 class MLCM_Widget extends WP_Widget {
     
     /**
-     * Конструктор виджета
+     * Widget constructor
+     * 
+     * Sets up widget with proper options, description, and control settings
+     * following WordPress widget development standards.
      */
     public function __construct() {
+        // Widget display options
         $widget_ops = [
             'classname' => 'mlcm_widget',
             'description' => __('Multi-level category menu for navigation', 'mlcm'),
-            'customize_selective_refresh' => true,
+            'customize_selective_refresh' => true, // Enable selective refresh in customizer
         ];
         
+        // Widget control panel options
         $control_ops = [
             'width' => 300,
             'height' => 350,
             'id_base' => 'mlcm_widget'
         ];
         
+        // Initialize parent widget class
         parent::__construct(
-            'mlcm_widget', // Base ID
-            __('Category Menu', 'mlcm'), // Name
+            'mlcm_widget', // Base ID - unique identifier
+            __('Category Menu', 'mlcm'), // Widget name displayed in admin
             $widget_ops,
             $control_ops
         );
     }
     
     /**
-     * Фронтенд виджета
+     * Frontend widget display
+     * 
+     * Renders the widget output on the frontend with user-configured settings.
+     * Temporarily overrides global plugin settings with widget-specific settings.
+     * 
+     * @param array $args Widget display arguments from register_sidebar()
+     * @param array $instance Widget instance settings from form
      */
     public function widget($args, $instance) {
-        // Извлекаем параметры виджета
+        // Extract widget settings with defaults
         $title = !empty($instance['title']) ? $instance['title'] : '';
         $layout = !empty($instance['layout']) ? $instance['layout'] : get_option('mlcm_menu_layout', 'vertical');
         $levels = !empty($instance['levels']) ? absint($instance['levels']) : absint(get_option('mlcm_initial_levels', 3));
         $show_button = !empty($instance['show_button']) ? '1' : '0';
         
-        // Применяем фильтр к заголовку
+        // Apply WordPress title filter for theme compatibility
         $title = apply_filters('widget_title', $title, $instance, $this->id_base);
         
-        // Выводим виджет
+        // Output widget wrapper
         echo $args['before_widget'];
         
+        // Display title if provided
         if (!empty($title)) {
             echo $args['before_title'] . esc_html($title) . $args['after_title'];
         }
         
-        // Генерируем меню с настройками из виджета
-        $shortcode_atts = [
-            'layout' => $layout,
-            'levels' => $levels,
-            'show_button' => $show_button
-        ];
-        
-        // Создаем временные опции для виджета
+        // Temporarily override global settings with widget settings
         $original_layout = get_option('mlcm_menu_layout');
         $original_levels = get_option('mlcm_initial_levels');
         $original_button = get_option('mlcm_show_button');
         
+        // Set widget-specific options
         update_option('mlcm_menu_layout', $layout);
         update_option('mlcm_initial_levels', $levels);
         update_option('mlcm_show_button', $show_button);
         
-        // Выводим меню
+        // Generate and display the menu
         echo do_shortcode('[mlcm_menu layout="' . esc_attr($layout) . '" levels="' . absint($levels) . '"]');
         
-        // Восстанавливаем оригинальные опции
+        // Restore original global settings
         update_option('mlcm_menu_layout', $original_layout);
         update_option('mlcm_initial_levels', $original_levels);
         update_option('mlcm_show_button', $original_button);
         
+        // Close widget wrapper
         echo $args['after_widget'];
     }
     
     /**
-     * Административная форма виджета
+     * Widget admin form
+     * 
+     * Creates the configuration form displayed in the WordPress admin
+     * when adding or editing the widget in the customizer or widgets page.
+     * 
+     * @param array $instance Current widget instance settings
      */
     public function form($instance) {
-        // Значения по умолчанию
+        // Set default values for new widget instances
         $defaults = [
             'title' => '',
             'layout' => get_option('mlcm_menu_layout', 'vertical'),
@@ -89,9 +118,10 @@ class MLCM_Widget extends WP_Widget {
             'show_button' => '0'
         ];
         
+        // Parse instance data with defaults
         $instance = wp_parse_args((array) $instance, $defaults);
         
-        // Поля формы
+        // Generate form fields
         ?>
         <p>
             <label for="<?php echo esc_attr($this->get_field_id('title')); ?>">
@@ -104,7 +134,7 @@ class MLCM_Widget extends WP_Widget {
                    value="<?php echo esc_attr($instance['title']); ?>" 
                    placeholder="<?php _e('Optional widget title', 'mlcm'); ?>" />
         </p>
-        
+
         <p>
             <label for="<?php echo esc_attr($this->get_field_id('layout')); ?>">
                 <?php _e('Layout:', 'mlcm'); ?>
@@ -120,7 +150,7 @@ class MLCM_Widget extends WP_Widget {
                 </option>
             </select>
         </p>
-        
+
         <p>
             <label for="<?php echo esc_attr($this->get_field_id('levels')); ?>">
                 <?php _e('Number of Levels:', 'mlcm'); ?>
@@ -135,10 +165,9 @@ class MLCM_Widget extends WP_Widget {
                 <?php endfor; ?>
             </select>
         </p>
-        
+
         <p>
-            <input class="checkbox" 
-                   type="checkbox" 
+            <input type="checkbox" 
                    <?php checked($instance['show_button'], '1'); ?>
                    id="<?php echo esc_attr($this->get_field_id('show_button')); ?>" 
                    name="<?php echo esc_attr($this->get_field_name('show_button')); ?>" 
@@ -147,7 +176,7 @@ class MLCM_Widget extends WP_Widget {
                 <?php _e('Show Go Button', 'mlcm'); ?>
             </label>
         </p>
-        
+
         <p class="description">
             <?php _e('This widget uses the Multi-Level Category Menu plugin settings as defaults. Widget-specific settings will override global settings for this instance only.', 'mlcm'); ?>
         </p>
@@ -155,23 +184,36 @@ class MLCM_Widget extends WP_Widget {
     }
     
     /**
-     * Обновление виджета
+     * Widget settings update
+     * 
+     * Processes and sanitizes form data when widget settings are saved.
+     * Includes validation and cache clearing for optimal performance.
+     * 
+     * @param array $new_instance New widget settings from form
+     * @param array $old_instance Previous widget settings
+     * @return array Sanitized widget settings to save
      */
     public function update($new_instance, $old_instance) {
         $instance = [];
         
-        // Санитизация данных
+        // Sanitize title input
         $instance['title'] = sanitize_text_field($new_instance['title']);
+        
+        // Validate and sanitize layout option
         $instance['layout'] = in_array($new_instance['layout'], ['vertical', 'horizontal']) 
             ? $new_instance['layout'] 
             : 'vertical';
+        
+        // Validate and sanitize levels (1-5 range)
         $instance['levels'] = absint($new_instance['levels']);
         if ($instance['levels'] < 1 || $instance['levels'] > 5) {
-            $instance['levels'] = 3;
+            $instance['levels'] = 3; // Default fallback
         }
+        
+        // Sanitize checkbox input
         $instance['show_button'] = !empty($new_instance['show_button']) ? '1' : '0';
         
-        // Очищаем кеш при обновлении настроек виджета
+        // Clear plugin cache when widget settings change
         if (class_exists('Multi_Level_Category_Menu')) {
             $mlcm = Multi_Level_Category_Menu::get_instance();
             if (method_exists($mlcm, 'clear_all_caches')) {

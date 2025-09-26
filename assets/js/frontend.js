@@ -1,16 +1,40 @@
+/**
+ * Multi-Level Category Menu Frontend JavaScript
+ * 
+ * Handles dynamic menu functionality including AJAX loading, caching,
+ * mobile responsiveness, and accessibility features.
+ * 
+ * @package Multi_Level_Category_Menu
+ * @version 3.6
+ * @author Name
+ */
+
 jQuery(function($) {
     'use strict';
     
+    // Main container reference
     const container = $('.mlcm-container');
     
-    // Кеширование DOM элементов для оптимизации
+    /**
+     * DOM element cache for performance optimization
+     * Caches frequently accessed elements to avoid repeated jQuery selections
+     */
     const cache = {
         containers: container,
         buttons: container.find('.mlcm-go-button'),
         selects: container.find('.mlcm-select')
     };
     
-    // Дебаунс для оптимизации событий
+    /**
+     * Debounce utility function
+     * 
+     * Limits the rate at which a function can fire to improve performance
+     * and prevent excessive API calls during rapid user interactions.
+     * 
+     * @param {Function} func - Function to debounce
+     * @param {number} wait - Wait time in milliseconds
+     * @returns {Function} Debounced function
+     */
     function debounce(func, wait) {
         let timeout;
         return function executedFunction(...args) {
@@ -23,11 +47,21 @@ jQuery(function($) {
         };
     }
     
-    // ДОБАВЛЕНО: Кеш для AJAX запросов с временными метками
+    /**
+     * AJAX request cache with timestamps
+     * 
+     * Caches AJAX responses to prevent duplicate requests and improve
+     * performance. Includes automatic expiration based on timestamps.
+     */
     const ajaxCache = new Map();
-    const CACHE_DURATION = 30 * 60 * 1000; // 30 минут в миллисекундах
+    const CACHE_DURATION = 30 * 60 * 1000; // 30 minutes in milliseconds
     
-    // Очистка устаревшего кеша
+    /**
+     * Clean expired cache entries
+     * 
+     * Removes cache entries older than CACHE_DURATION to prevent
+     * memory leaks and stale data usage.
+     */
     function cleanExpiredCache() {
         const now = Date.now();
         for (let [key, value] of ajaxCache.entries()) {
@@ -37,25 +71,39 @@ jQuery(function($) {
         }
     }
     
-    // Удаление дублированных кнопок
+    /**
+     * Initialize plugin and remove duplicate elements
+     * 
+     * Removes duplicate Go buttons that may appear due to widget/shortcode conflicts
+     * and applies dynamic styling based on container properties.
+     */
+    
+    // Remove duplicate Go buttons (fix for widget conflicts)
     cache.containers.each(function() {
         const $buttons = $(this).find('.mlcm-go-button');
         if ($buttons.length > 1) {
-            $buttons.slice(1).remove();
+            $buttons.slice(1).remove(); // Keep first, remove duplicates
         }
     });
     
-    // Применение динамических стилей
+    // Apply dynamic CSS custom properties from container styles
     cache.containers.each(function() {
         const $cont = $(this);
         const gap = parseInt($cont.css('gap')) || 20;
         const fontSize = $cont.css('font-size');
         
+        // Set CSS custom properties for consistent styling
         $cont[0].style.setProperty('--mlcm-gap', `${gap}px`);
         $cont[0].style.setProperty('--mlcm-font-size', fontSize);
     });
     
-    // ОПТИМИЗИРОВАННЫЙ: Обработчик изменений в селектах с ленивой загрузкой
+    /**
+     * Main select change handler with debouncing
+     * 
+     * Handles category selection events, processes user choices,
+     * and initiates lazy loading of subcategories. Uses debouncing
+     * to prevent excessive API calls during rapid selections.
+     */
     cache.containers.on('change', '.mlcm-select', debounce(function() {
         const $select = $(this);
         const level = $select.data('level');
@@ -63,22 +111,34 @@ jQuery(function($) {
         const parentId = selectedOption.val();
         const slug = selectedOption.data('slug');
         
+        // Handle "no selection" option
         if (parentId === '-1') {
             resetLevels(level);
             return;
         }
         
-        // Сохраняем slug для выбранной категории
+        // Store slug for the selected category
         $select.data('selected-slug', slug);
         
-        // УЛУЧШЕНО: Ленивая загрузка подкategорий
+        // Trigger lazy loading of subcategories
         lazyLoadSubcategories($select, level, parentId);
-    }, 150));
+    }, 150)); // 150ms debounce delay
     
-    // Обработчик нажатий на кнопку
+    /**
+     * Go button click handler
+     * 
+     * Handles navigation button clicks to redirect to selected category page.
+     */
     cache.containers.on('click', '.mlcm-go-button', redirectToCategory);
     
-    // Сброс следующих уровней
+    /**
+     * Reset subsequent menu levels
+     * 
+     * Clears and disables all menu levels after the specified current level
+     * when user makes a new selection or selects "no option".
+     * 
+     * @param {number} currentLevel - Current menu level (1-5)
+     */
     function resetLevels(currentLevel) {
         cache.containers.find('.mlcm-select').each(function() {
             const $this = $(this);
@@ -86,18 +146,27 @@ jQuery(function($) {
                 $this.val('-1').prop('disabled', true).removeClass('mlcm-loading');
                 $this.removeData('selected-slug');
                 
-                // Очищаем опции кроме первой
+                // Clear options except the first (placeholder) option
                 $this.find('option:not(:first)').remove();
             }
         });
     }
     
     /**
-     * НОВОЕ: Ленивая загрузка подкategорий с улучшенным кешированием
+     * Lazy load subcategories with caching
+     * 
+     * Dynamically loads subcategories for selected parent category using AJAX.
+     * Implements intelligent caching to prevent duplicate requests and improve
+     * performance. Handles loading states and error conditions gracefully.
+     * 
+     * @param {jQuery} $select - Current select element
+     * @param {number} level - Current menu level
+     * @param {number} parentId - Parent category ID
      */
     function lazyLoadSubcategories($select, level, parentId) {
         const maxLevels = cache.containers.data('levels');
         
+        // If at max level, redirect immediately
         if (level >= maxLevels) {
             redirectToCategory();
             return;
@@ -105,10 +174,10 @@ jQuery(function($) {
         
         const cacheKey = `mlcm_lazy_${parentId}`;
         
-        // Очистка устаревшего кеша
+        // Clean expired cache entries
         cleanExpiredCache();
         
-        // Проверяем кеш
+        // Check cache first
         if (ajaxCache.has(cacheKey)) {
             const cached = ajaxCache.get(cacheKey);
             if (Date.now() - cached.timestamp < CACHE_DURATION) {
@@ -117,10 +186,15 @@ jQuery(function($) {
             }
         }
         
-        // Показываем индикатор загрузки
+        // Show loading indicator
         $select.addClass('mlcm-loading');
         
-        // ОПТИМИЗИРОВАНО: AJAX запрос для ленивой загрузки
+        /**
+         * AJAX request for subcategories
+         * 
+         * Sends AJAX request to WordPress backend to fetch subcategories
+         * for the selected parent category with error handling and retry logic.
+         */
         $.ajax({
             url: mlcmVars.ajax_url,
             method: 'POST',
@@ -129,15 +203,16 @@ jQuery(function($) {
                 parent_id: parentId,
                 security: mlcmVars.nonce
             },
-            timeout: 10000, // 10 секунд таймаут
+            timeout: 10000, // 10 second timeout
             beforeSend: () => {
+                // Disable subsequent levels during loading
                 $select.nextAll('.mlcm-select').val('-1').prop('disabled', true);
             },
             success: (response) => {
                 $select.removeClass('mlcm-loading');
                 
                 if (response.success) {
-                    // Кешируем ответ
+                    // Cache successful response
                     ajaxCache.set(cacheKey, {
                         data: response.data,
                         timestamp: Date.now()
@@ -154,7 +229,7 @@ jQuery(function($) {
                 console.error('MLCM Ajax Error:', {xhr, status, error});
                 showErrorState($select);
                 
-                // Повторная попытка для критических ошибок
+                // Retry logic for critical errors
                 if (xhr.status === 0 || xhr.status >= 500) {
                     setTimeout(() => {
                         if (confirm('Connection error. Retry loading subcategories?')) {
@@ -166,7 +241,14 @@ jQuery(function($) {
         });
     }
     
-    // ДОБАВЛЕНО: Обработка состояния ошибки
+    /**
+     * Display error state in next select level
+     * 
+     * Shows user-friendly error message with retry option when
+     * AJAX request fails. Provides graceful error recovery.
+     * 
+     * @param {jQuery} $select - Current select element that failed
+     */
     function showErrorState($select) {
         const level = $select.data('level');
         const nextLevel = level + 1;
@@ -178,7 +260,7 @@ jQuery(function($) {
                 <option value="retry">🔄 Click to retry</option>
             `).prop('disabled', false);
             
-            // Обработчик повторной попытки
+            // Handle retry selection
             $nextSelect.off('change.retry').on('change.retry', function() {
                 if ($(this).val() === 'retry') {
                     const parentId = $select.val();
@@ -191,17 +273,35 @@ jQuery(function($) {
         }
     }
     
-    // Обработка подкategорий
+    /**
+     * Process loaded subcategories
+     * 
+     * Handles successful subcategory loading by either updating the next
+     * level select element or redirecting if no subcategories exist.
+     * 
+     * @param {jQuery} $select - Current select element
+     * @param {number} level - Current menu level
+     * @param {Object} categories - Category data from AJAX response
+     */
     function processSubcategories($select, level, categories) {
         if (Object.keys(categories).length > 0) {
             updateNextLevel($select, level, categories);
         } else {
-            // Если нет подкategорий, переходим к выбранной категории
+            // No subcategories found, redirect to current selection
             redirectToCategory();
         }
     }
     
-    // УЛУЧШЕНО: Обновление следующего уровня с оптимизацией
+    /**
+     * Update next menu level with subcategories
+     * 
+     * Populates the next select element with subcategory options,
+     * applying proper sorting and creating optimized DOM elements.
+     * 
+     * @param {jQuery} $select - Current select element
+     * @param {number} currentLevel - Current menu level
+     * @param {Object} categories - Category data to populate
+     */
     function updateNextLevel($select, currentLevel, categories) {
         const nextLevel = currentLevel + 1;
         const $nextSelect = $(`.mlcm-select[data-level="${nextLevel}"]`);
@@ -214,10 +314,14 @@ jQuery(function($) {
         if (Object.keys(categories).length > 0) {
             const label = mlcmVars.labels[nextLevel-1] || `Level ${nextLevel}`;
             
-            // ОПТИМИЗИРОВАНО: Сортировка с поддержкой Unicode и кеширование
+            /**
+             * Sort categories with Unicode support
+             * 
+             * Uses Intl.Collator for proper sorting of international characters
+             * and mixed case text, ensuring consistent alphabetical order.
+             */
             const sortedEntries = Object.entries(categories)
                 .sort(([,a], [,b]) => {
-                    // Используем Intl.Collator для правильной сортировки Unicode
                     const collator = new Intl.Collator(undefined, { 
                         sensitivity: 'base',
                         numeric: true,
@@ -226,16 +330,16 @@ jQuery(function($) {
                     return collator.compare(a.name, b.name);
                 });
             
-            // Создаем options более эффективно через DocumentFragment
+            // Create options efficiently using DocumentFragment
             const fragment = document.createDocumentFragment();
             
-            // Добавляем placeholder option
+            // Add placeholder option
             const placeholderOption = document.createElement('option');
             placeholderOption.value = '-1';
             placeholderOption.textContent = label;
             fragment.appendChild(placeholderOption);
             
-            // Добавляем категории
+            // Add category options
             sortedEntries.forEach(([id, data]) => {
                 const option = document.createElement('option');
                 option.value = id;
@@ -245,21 +349,27 @@ jQuery(function($) {
                 fragment.appendChild(option);
             });
             
-            // Обновляем select одним действием
+            // Update select element in single DOM operation
             $nextSelect[0].innerHTML = '';
             $nextSelect[0].appendChild(fragment);
             
+            // Enable and focus the next select
             $nextSelect.prop('disabled', false).focus();
             
-            // ДОБАВЛЕНО: Плавная анимация появления
+            // Add smooth appearance animation
             $nextSelect.addClass('mlcm-loaded').removeClass('mlcm-loading');
-                
+            
         } else {
             redirectToCategory();
         }
     }
     
-    // Переадресация на страницу категории
+    /**
+     * Redirect to selected category page
+     * 
+     * Finds the last selected category and redirects the browser to its page.
+     * Shows loading indicator during navigation for better user experience.
+     */
     function redirectToCategory() {
         const $lastSelect = cache.containers.find('.mlcm-select').filter(function() {
             return $(this).val() !== '-1';
@@ -269,47 +379,62 @@ jQuery(function($) {
             const selectedOption = $lastSelect.find('option:selected');
             const url = selectedOption.data('url');
             if (url) {
-                // ДОБАВЛЕНО: Показываем индикатор загрузки перед переходом
+                // Show redirect indicator
                 $lastSelect.addClass('mlcm-redirecting');
                 window.location.href = url;
             }
         }
     }
     
-    // УЛУЧШЕНО: Адаптация для мобильных устройств
+    /**
+     * Handle mobile layout adaptation
+     * 
+     * Detects mobile viewport and applies appropriate styling and behavior
+     * for touch devices. Improves usability on small screens.
+     */
     function handleMobileLayout() {
         const isMobile = window.matchMedia('(max-width: 768px)').matches;
         
         cache.containers.toggleClass('mobile-layout', isMobile);
         
         if (isMobile) {
-            // Адаптивные стили для мобильных
+            // Mobile-specific button styling
             cache.containers.find('.mlcm-go-button').css({
                 'width': '100%',
                 'margin': '10px 0 0 0'
             });
             
-            // Увеличиваем область касания на мобильных
+            // Increase touch target size for selects
             cache.containers.find('.mlcm-select').css({
-                'min-height': '44px',
-                'font-size': 'clamp(14px, 4vw, 18px)'
+                'min-height': '44px', // iOS recommended touch target
+                'font-size': 'clamp(14px, 4vw, 18px)' // Responsive font size
             });
         }
     }
     
-    // Оптимизированный обработчик resize
+    /**
+     * Debounced resize handler
+     * 
+     * Handles window resize events with debouncing to prevent excessive
+     * layout recalculations during window resizing.
+     */
     const debouncedResize = debounce(handleMobileLayout, 200);
     
-    // Инициализация
+    // Initialize mobile layout and attach resize handler
     handleMobileLayout();
     $(window).on('resize', debouncedResize);
     
-    // ДОБАВЛЕНО: Очистка кеша при выходе/перезагрузке
+    /**
+     * Cache cleanup on page unload
+     * 
+     * Performs cache maintenance before page unload to prevent memory
+     * leaks and saves cache statistics for debugging.
+     */
     $(window).on('beforeunload', function() {
-        // Очищаем только старые данные
+        // Clean expired cache entries
         cleanExpiredCache();
         
-        // Сохраняем статистику использования кеша
+        // Save cache statistics for debugging
         if (ajaxCache.size > 0) {
             sessionStorage.setItem('mlcm_cache_stats', JSON.stringify({
                 size: ajaxCache.size,
@@ -318,21 +443,32 @@ jQuery(function($) {
         }
     });
     
-    // УЛУЧШЕНО: Accessibility улучшения
+    /**
+     * Accessibility enhancements
+     * 
+     * Improves keyboard navigation and screen reader support by adding
+     * proper focus states and ARIA labels dynamically.
+     */
     cache.selects.on('focus', function() {
         $(this).parent().addClass('mlcm-focused');
         
-        // Показываем подсказку для screen readers
+        // Add descriptive ARIA label for screen readers
         const level = $(this).data('level');
         $(this).attr('aria-label', `Category selector level ${level}`);
     }).on('blur', function() {
         $(this).parent().removeClass('mlcm-focused');
     });
     
-    // ДОБАВЛЕНО: Keyboard navigation improvements
+    /**
+     * Enhanced keyboard navigation
+     * 
+     * Provides keyboard shortcuts and improved navigation between
+     * menu levels using Enter and Tab keys.
+     */
     cache.containers.on('keydown', '.mlcm-select', function(e) {
         const $this = $(this);
         
+        // Enter key triggers subcategory loading
         if (e.key === 'Enter' && $this.val() !== '-1') {
             e.preventDefault();
             const level = $this.data('level');
@@ -340,7 +476,7 @@ jQuery(function($) {
             lazyLoadSubcategories($this, level, parentId);
         }
         
-        // Быстрое перемещение между уровнями с помощью Tab
+        // Tab key jumps to next available level
         if (e.key === 'Tab') {
             const currentLevel = $this.data('level');
             const nextSelect = $(`.mlcm-select[data-level="${currentLevel + 1}"]`);
@@ -352,35 +488,20 @@ jQuery(function($) {
         }
     });
     
-    // ДОБАВЛЕНО: Индикатор прогресса для длительных операций
+    /**
+     * Progress indicator for long operations
+     * 
+     * Shows a modal progress indicator for operations that take longer
+     * than 1 second to provide better user feedback.
+     */
     let progressIndicator = null;
     
     function showProgress(message = 'Loading...') {
         if (!progressIndicator) {
             progressIndicator = $(`
-                <div class="mlcm-progress-indicator" style="
-                    position: fixed;
-                    top: 50%;
-                    left: 50%;
-                    transform: translate(-50%, -50%);
-                    background: rgba(0,0,0,0.8);
-                    color: white;
-                    padding: 15px 20px;
-                    border-radius: 5px;
-                    z-index: 10000;
-                    font-size: 14px;
-                ">
-                    <div class="spinner" style="
-                        width: 20px;
-                        height: 20px;
-                        border: 2px solid #fff;
-                        border-top: 2px solid transparent;
-                        border-radius: 50%;
-                        animation: spin 1s linear infinite;
-                        display: inline-block;
-                        margin-right: 10px;
-                    "></div>
-                    <span>${message}</span>
+                <div class="mlcm-progress-indicator">
+                    <div class="spinner"></div>
+                    ${message}
                 </div>
             `);
             $('body').append(progressIndicator);
@@ -394,7 +515,7 @@ jQuery(function($) {
         }
     }
     
-    // Показываем прогресс для медленных AJAX запросов
+    // Show progress for slow AJAX requests
     let progressTimeout;
     $(document).ajaxStart(function() {
         progressTimeout = setTimeout(() => showProgress('Loading categories...'), 1000);
@@ -403,14 +524,24 @@ jQuery(function($) {
         hideProgress();
     });
     
-    // ДОБАВЛЕНО: Восстановление состояния после ошибок сети
+    /**
+     * Network connection recovery
+     * 
+     * Handles network reconnection by clearing stale cache and
+     * refreshing the first level when connection is restored.
+     */
     $(window).on('online', function() {
-        // Очищаем кеш и перезагружаем данные при восстановлении соединения
+        // Clear cache and reload data when connection restored
         ajaxCache.clear();
         cache.containers.find('.mlcm-select[data-level="1"]').trigger('change');
     });
     
-    // Логирование производительности для отладки
+    /**
+     * Performance logging for debugging
+     * 
+     * Logs initialization timing for performance monitoring
+     * and debugging purposes in development environments.
+     */
     if (typeof console !== 'undefined' && console.time) {
         console.time('MLCM Frontend Init');
         $(window).on('load', function() {
@@ -418,4 +549,5 @@ jQuery(function($) {
             console.log('MLCM: Frontend initialized successfully');
         });
     }
+    
 });
