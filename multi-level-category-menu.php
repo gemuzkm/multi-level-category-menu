@@ -380,29 +380,24 @@ class Multi_Level_Category_Menu {
         $select_id = "mlcm-select-level-{$level}";
         $label_id = "mlcm-label-level-{$level}";
         ?>
-        <div class="mlcm-select-wrapper">
-            <!-- ДОБАВЛЕНО: Скрытый label для accessibility -->
-            <label for="<?= esc_attr($select_id) ?>" id="<?= esc_attr($label_id) ?>" class="sr-only">
-                <?= esc_html($label) ?>
-            </label>
 
-            <select class="mlcm-select" 
-                    id="<?= esc_attr($select_id) ?>"
-                    aria-labelledby="<?= esc_attr($label_id) ?>"
-                    data-level="<?= $level ?>" 
-                    <?= $level > 1 ? 'disabled' : '' ?>>
-                <option value="-1"><?= esc_html($label) ?></option>
-                <?php foreach ($categories as $id => $data): 
-                    $cat_link = get_category_link($id);
-                ?>
-                    <option value="<?= $id ?>" 
-                            data-slug="<?= esc_attr($data['slug']) ?>" 
-                            data-url="<?= esc_url($cat_link) ?>">
-                        <?= esc_html($data['name']) ?>
-                    </option>
-                <?php endforeach; ?>
-            </select>
-        </div>
+         <select class="mlcm-select" 
+                id="<?= esc_attr($select_id) ?>"
+                aria-label="<?= esc_attr($label) ?>"
+                title="<?= esc_attr($label) ?>"
+                data-level="<?= $level ?>" 
+                <?= $level > 1 ? 'disabled' : '' ?>>
+            <option value="-1"><?= esc_html($label) ?></option>
+            <?php foreach ($categories as $id => $data): 
+                $cat_link = get_category_link($id);
+            ?>
+                <option value="<?= $id ?>" 
+                        data-slug="<?= esc_attr($data['slug']) ?>" 
+                        data-url="<?= esc_url($cat_link) ?>">
+                    <?= esc_html($data['name']) ?>
+                </option>
+            <?php endforeach; ?>
+        </select>
         <?php
     }
 
