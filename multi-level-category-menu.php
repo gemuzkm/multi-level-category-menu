@@ -60,20 +60,23 @@ class Multi_Level_Category_Menu {
     }
 
     /**
-     * Setup secure cookie-based nonce
-     */
+    * Setup secure cookie-based nonce
+    * Returns the nonce value (new or existing)
+    */
     public function setup_cookie_nonce() {
         $cookie_name = 'mlcm_nonce';
-        
+    
+        // Проверяем существующий cookie
         if (isset($_COOKIE[$cookie_name])) {
             $cookie_nonce = sanitize_text_field($_COOKIE[$cookie_name]);
             if (wp_verify_nonce($cookie_nonce, 'mlcm_nonce')) {
-                return;
+                return $cookie_nonce; // Возвращаем валидный
             }
         }
-        
+    
+        // Генерируем новый
         $new_nonce = wp_create_nonce('mlcm_nonce');
-        
+    
         setcookie(
             $cookie_name,
             $new_nonce,
@@ -83,14 +86,8 @@ class Multi_Level_Category_Menu {
             is_ssl(),
             true
         );
-    }
-
-    /**
-     * Get nonce from cookie
-     */
-    private function get_cookie_nonce() {
-        $cookie_name = 'mlcm_nonce';
-        return isset($_COOKIE[$cookie_name]) ? sanitize_text_field($_COOKIE[$cookie_name]) : '';
+    
+        return $new_nonce; // ← ВАЖНО! Возвращаем новый nonce
     }
 
     public function render_gutenberg_block($attributes) {
@@ -211,7 +208,14 @@ class Multi_Level_Category_Menu {
     }
 
     public function ajax_handler() {
-    $nonce = sanitize_text_field($_POST['security'] ?? $this->get_cookie_nonce());
+        // Проверяем nonce из POST или вызываем setup_cookie_nonce() для получения текущего
+        $nonce = sanitize_text_field($_POST['security'] ?? '');
+    
+        // Если nonce пустой, пытаемся получить из cookie
+        if (empty($nonce) && isset($_COOKIE['mlcm_nonce'])) {
+            $nonce = sanitize_text_field($_COOKIE['mlcm_nonce']);
+        }
+    
         if (!wp_verify_nonce($nonce, 'mlcm_nonce')) {
             wp_send_json_error(['message' => 'Invalid nonce']);
             wp_die();
@@ -363,9 +367,11 @@ class Multi_Level_Category_Menu {
             true
         );
         
+        $this->setup_cookie_nonce();
+
         wp_localize_script('mlcm-frontend', 'mlcmVars', [
             'ajax_url' => admin_url('admin-ajax.php'),
-            'nonce' => $this->get_cookie_nonce(), // Pass nonce from cookie
+            'nonce' => $current_nonce, // Pass nonce from cookie
             'labels' => array_map(function($i) {
                 return get_option("mlcm_level_{$i}_label", "Level {$i}");
             }, range(1,5)),
