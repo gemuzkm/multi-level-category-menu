@@ -2,12 +2,8 @@
  * Get fresh nonce from cookie
  */
 function getMlcmNonce() {
-    const cookieNonce = document.cookie
-        .split('; ')
-        .find(row => row.startsWith('mlcm_nonce='))
-        ?.split('=')[1];
-    
-    return cookieNonce || (typeof mlcmVars !== 'undefined' ? mlcmVars.nonce : '');
+    const match = document.cookie.match(/mlcm_nonce=([^;]+)/);
+    return match ? match[1] : (typeof mlcmVars !== 'undefined' ? mlcmVars.nonce : '');
 }
 
 jQuery(function($) {
