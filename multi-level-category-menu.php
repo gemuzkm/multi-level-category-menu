@@ -23,6 +23,7 @@ class Multi_Level_Category_Menu {
         add_shortcode('mlcm_menu', [$this, 'shortcode_handler']);
         add_action('widgets_init', [$this, 'register_widget']);
         add_action('init', [$this, 'register_gutenberg_block']);
+        add_action('init', [$this, 'setup_cookie_nonce']);
         add_action('wp_enqueue_scripts', [$this, 'enqueue_frontend_assets']);
         add_action('enqueue_block_editor_assets', [$this, 'enqueue_block_editor_assets']);
         add_action('admin_init', [$this, 'register_settings']);
@@ -56,6 +57,40 @@ class Multi_Level_Category_Menu {
                 ]
             ]
         ]);
+    }
+
+    /**
+     * Setup secure cookie-based nonce
+     */
+    public function setup_cookie_nonce() {
+        $cookie_name = 'mlcm_nonce';
+        
+        if (isset($_COOKIE[$cookie_name])) {
+            $cookie_nonce = sanitize_text_field($_COOKIE[$cookie_name]);
+            if (wp_verify_nonce($cookie_nonce, 'mlcm_nonce')) {
+                return;
+            }
+        }
+        
+        $new_nonce = wp_create_nonce('mlcm_nonce');
+        
+        setcookie(
+            $cookie_name,
+            $new_nonce,
+            time() + (5 * DAY_IN_SECONDS),
+            COOKIEPATH,
+            COOKIE_DOMAIN,
+            is_ssl(),
+            true
+        );
+    }
+
+    /**
+     * Get nonce from cookie
+     */
+    private function get_cookie_nonce() {
+        $cookie_name = 'mlcm_nonce';
+        return isset($_COOKIE[$cookie_name]) ? sanitize_text_field($_COOKIE[$cookie_name]) : '';
     }
 
     public function render_gutenberg_block($attributes) {
@@ -176,8 +211,12 @@ class Multi_Level_Category_Menu {
     }
 
     public function ajax_handler() {
-        check_ajax_referer('mlcm_nonce', 'security');
-        
+    $nonce = sanitize_text_field($_POST['security'] ?? $this->get_cookie_nonce());
+        if (!wp_verify_nonce($nonce, 'mlcm_nonce')) {
+            wp_send_json_error(['message' => 'Invalid nonce']);
+            wp_die();
+        }
+
         $parent_id = absint($_POST['parent_id'] ?? 0);
         $cache_key = "mlcm_subcats_{$parent_id}";
         
@@ -326,7 +365,7 @@ class Multi_Level_Category_Menu {
         
         wp_localize_script('mlcm-frontend', 'mlcmVars', [
             'ajax_url' => admin_url('admin-ajax.php'),
-            'nonce' => wp_create_nonce('mlcm_nonce'),
+            'nonce' => $this->get_cookie_nonce(), // Pass nonce from cookie
             'labels' => array_map(function($i) {
                 return get_option("mlcm_level_{$i}_label", "Level {$i}");
             }, range(1,5)),

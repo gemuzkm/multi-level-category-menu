@@ -1,3 +1,15 @@
+/**
+ * Get fresh nonce from cookie
+ */
+function getMlcmNonce() {
+    const cookieNonce = document.cookie
+        .split('; ')
+        .find(row => row.startsWith('mlcm_nonce='))
+        ?.split('=')[1];
+    
+    return cookieNonce || (typeof mlcmVars !== 'undefined' ? mlcmVars.nonce : '');
+}
+
 jQuery(function($) {
     const container = $('.mlcm-container');
 
@@ -63,7 +75,7 @@ jQuery(function($) {
             data: {
                 action: 'mlcm_get_subcategories',
                 parent_id: parentId,
-                security: mlcmVars.nonce
+                security: getMlcmNonce() // Use nonce from cookie
             },
             beforeSend: () => {
                 $select.nextAll('.mlcm-select').val('-1').prop('disabled', true);
