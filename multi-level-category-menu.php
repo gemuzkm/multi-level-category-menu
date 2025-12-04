@@ -367,7 +367,7 @@ class Multi_Level_Category_Menu {
             true
         );
         
-        $this->setup_cookie_nonce();
+        $current_nonce = $this->setup_cookie_nonce();
 
         wp_localize_script('mlcm-frontend', 'mlcmVars', [
             'ajax_url' => admin_url('admin-ajax.php'),
