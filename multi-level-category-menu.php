@@ -2,7 +2,7 @@
 /*
 Plugin Name: Multi-Level Category Menu
 Description: Creates customizable category menus with 5-level depth
-Version: 3.5
+Version: 3.5.1
 Author: Name
 Text Domain: mlcm
 */
@@ -11,8 +11,8 @@ defined('ABSPATH') || exit;
 
 class Multi_Level_Category_Menu {
     private static $instance;
-    private $options_cache = null; // Кеш настроек
-    private $nonce_cache = null;   // Кеш nonce
+    private $options_cache = null;
+    private $nonce_cache = null;
 
     public static function get_instance() {
         if (!isset(self::$instance)) {
@@ -43,20 +43,20 @@ class Multi_Level_Category_Menu {
     private function get_options() {
         if (null === $this->options_cache) {
             $this->options_cache = [
-                'font_size' => get_option('mlcm_font_size', ''),
-                'container_gap' => get_option('mlcm_container_gap', ''),
-                'button_bg_color' => get_option('mlcm_button_bg_color', ''),
-                'button_font_size' => get_option('mlcm_button_font_size', ''),
-                'button_hover_bg_color' => get_option('mlcm_button_hover_bg_color', ''),
-                'menu_layout' => get_option('mlcm_menu_layout', 'vertical'),
+                'font_size' => sanitize_text_field(get_option('mlcm_font_size', '')),
+                'container_gap' => absint(get_option('mlcm_container_gap', 0)),
+                'button_bg_color' => sanitize_hex_color(get_option('mlcm_button_bg_color', '')),
+                'button_font_size' => sanitize_text_field(get_option('mlcm_button_font_size', '')),
+                'button_hover_bg_color' => sanitize_hex_color(get_option('mlcm_button_hover_bg_color', '')),
+                'menu_layout' => sanitize_text_field(get_option('mlcm_menu_layout', 'vertical')),
                 'initial_levels' => absint(get_option('mlcm_initial_levels', 3)),
                 'menu_width' => absint(get_option('mlcm_menu_width', 250)),
                 'show_button' => get_option('mlcm_show_button', '0') === '1',
                 'use_category_base' => get_option('mlcm_use_category_base', '1') === '1',
-                'custom_root_id' => get_option('mlcm_custom_root_id', ''),
-                'excluded_cats' => get_option('mlcm_excluded_cats', ''),
+                'custom_root_id' => absint(get_option('mlcm_custom_root_id', 0)),
+                'excluded_cats' => sanitize_text_field(get_option('mlcm_excluded_cats', '')),
                 'labels' => array_map(function($i) {
-                    return get_option("mlcm_level_{$i}_label", "Level {$i}");
+                    return sanitize_text_field(get_option("mlcm_level_{$i}_label", "Level {$i}"));
                 }, range(1, 5))
             ];
         }
@@ -69,13 +69,13 @@ class Multi_Level_Category_Menu {
     private function generate_inline_css($options) {
         $css = [];
         
-        if (!empty($options['menu_width'])) {
+        if ($options['menu_width']) {
             $css[] = ".mlcm-select{width:{$options['menu_width']}px}";
         }
         if (!empty($options['font_size'])) {
             $css[] = ".mlcm-select{font-size:{$options['font_size']}rem}";
         }
-        if (!empty($options['container_gap'])) {
+        if ($options['container_gap']) {
             $css[] = ".mlcm-container{gap:{$options['container_gap']}px}";
         }
         if (!empty($options['button_bg_color'])) {
@@ -201,8 +201,10 @@ class Multi_Level_Category_Menu {
                 <?= $level > 1 ? 'disabled' : '' ?>>
             <option value="-1"><?= esc_html($label) ?></option>
             <?php foreach ($categories as $id => $data): ?>
-                <option value="<?= absint($id) ?>" data-slug="<?= esc_attr($data['slug']) ?>" data-url="<?= esc_url($data['url']) ?>">
-                    <?= esc_html($data['name']) ?>
+                <option value="<?= absint($id) ?>" 
+                        data-slug="<?= esc_attr($data['slug'] ?? '') ?>" 
+                        data-url="<?= esc_url($data['url'] ?? '') ?>">
+                    <?= esc_html($data['name'] ?? '') ?>
                 </option>
             <?php endforeach; ?>
         </select>
@@ -212,11 +214,17 @@ class Multi_Level_Category_Menu {
     private function get_root_categories() {
         $options = $this->get_options();
         $custom_root_id = $options['custom_root_id'];
-        $excluded = array_filter(array_map('absint', explode(',', $options['excluded_cats'])));
+        $excluded_str = $options['excluded_cats'];
         
-        $parent = (!empty($custom_root_id) && is_numeric($custom_root_id)) 
-            ? absint($custom_root_id) 
-            : 0;
+        // Безопасное преобразование строки в массив ID
+        $excluded = [];
+        if (!empty($excluded_str)) {
+            $excluded = array_filter(
+                array_map('absint', array_map('trim', explode(',', $excluded_str)))
+            );
+        }
+        
+        $parent = ($custom_root_id > 0) ? $custom_root_id : 0;
         $cache_key = ($parent === 0) ? 'mlcm_root_cats' : "mlcm_subcats_{$parent}";
         
         $cache = get_transient($cache_key);
@@ -290,58 +298,84 @@ class Multi_Level_Category_Menu {
     }
 
     public function register_settings() {
-        register_setting('mlcm_options', 'mlcm_font_size');
-        register_setting('mlcm_options', 'mlcm_container_gap');
-        register_setting('mlcm_options', 'mlcm_button_bg_color');
-        register_setting('mlcm_options', 'mlcm_button_font_size');
-        register_setting('mlcm_options', 'mlcm_button_hover_bg_color');
-        register_setting('mlcm_options', 'mlcm_menu_layout');
-        register_setting('mlcm_options', 'mlcm_initial_levels');
-        register_setting('mlcm_options', 'mlcm_excluded_cats');
-        register_setting('mlcm_options', 'mlcm_menu_width');
-        register_setting('mlcm_options', 'mlcm_show_button');
-        register_setting('mlcm_options', 'mlcm_use_category_base');
-        register_setting('mlcm_options', 'mlcm_custom_root_id');
+        register_setting('mlcm_options', 'mlcm_font_size', [
+            'sanitize_callback' => 'sanitize_text_field'
+        ]);
+        register_setting('mlcm_options', 'mlcm_container_gap', [
+            'sanitize_callback' => 'absint'
+        ]);
+        register_setting('mlcm_options', 'mlcm_button_bg_color', [
+            'sanitize_callback' => 'sanitize_hex_color'
+        ]);
+        register_setting('mlcm_options', 'mlcm_button_font_size', [
+            'sanitize_callback' => 'sanitize_text_field'
+        ]);
+        register_setting('mlcm_options', 'mlcm_button_hover_bg_color', [
+            'sanitize_callback' => 'sanitize_hex_color'
+        ]);
+        register_setting('mlcm_options', 'mlcm_menu_layout', [
+            'sanitize_callback' => 'sanitize_text_field'
+        ]);
+        register_setting('mlcm_options', 'mlcm_initial_levels', [
+            'sanitize_callback' => 'absint'
+        ]);
+        register_setting('mlcm_options', 'mlcm_excluded_cats', [
+            'sanitize_callback' => 'sanitize_text_field'
+        ]);
+        register_setting('mlcm_options', 'mlcm_menu_width', [
+            'sanitize_callback' => 'absint'
+        ]);
+        register_setting('mlcm_options', 'mlcm_show_button', [
+            'sanitize_callback' => 'rest_sanitize_boolean'
+        ]);
+        register_setting('mlcm_options', 'mlcm_use_category_base', [
+            'sanitize_callback' => 'rest_sanitize_boolean'
+        ]);
+        register_setting('mlcm_options', 'mlcm_custom_root_id', [
+            'sanitize_callback' => 'absint'
+        ]);
 
         for ($i = 1; $i <= 5; $i++) {
-            register_setting('mlcm_options', "mlcm_level_{$i}_label");
+            register_setting('mlcm_options', "mlcm_level_{$i}_label", [
+                'sanitize_callback' => 'sanitize_text_field'
+            ]);
         }
 
         add_settings_section('mlcm_main', 'Main Settings', null, 'mlcm_options');
 
         add_settings_field('mlcm_font_size', 'Font Size for Menu Items (rem)', function() {
-            $font_size = get_option('mlcm_font_size', '');
+            $font_size = sanitize_text_field(get_option('mlcm_font_size', ''));
             echo '<input type="number" step="0.1" min="0.5" max="5" name="mlcm_font_size" value="'.esc_attr($font_size).'">';
         }, 'mlcm_options', 'mlcm_main');
 
         add_settings_field('mlcm_container_gap', 'Gap Between Menu Items (px)', function() {
-            $gap = get_option('mlcm_container_gap', '');
+            $gap = absint(get_option('mlcm_container_gap', 0));
             echo '<input type="number" min="0" step="1" name="mlcm_container_gap" value="'.esc_attr($gap).'">';
         }, 'mlcm_options', 'mlcm_main');
 
         add_settings_field('mlcm_button_bg_color', 'Button Background Color', function() {
-            $bg_color = get_option('mlcm_button_bg_color', '');
+            $bg_color = sanitize_hex_color(get_option('mlcm_button_bg_color', ''));
             echo '<input type="color" name="mlcm_button_bg_color" value="'.esc_attr($bg_color).'">';
         }, 'mlcm_options', 'mlcm_main');
 
         add_settings_field('mlcm_button_hover_bg_color', 'Button Hover Background Color', function() {
-            $hover_bg_color = get_option('mlcm_button_hover_bg_color', '');
+            $hover_bg_color = sanitize_hex_color(get_option('mlcm_button_hover_bg_color', ''));
             echo '<input type="color" name="mlcm_button_hover_bg_color" value="'.esc_attr($hover_bg_color).'">';
         }, 'mlcm_options', 'mlcm_main');
 
         add_settings_field('mlcm_button_font_size', 'Button Font Size (rem)', function() {
-            $font_size = get_option('mlcm_button_font_size', '');
+            $font_size = sanitize_text_field(get_option('mlcm_button_font_size', ''));
             echo '<input type="number" step="0.1" min="0.5" max="5" name="mlcm_button_font_size" value="'.esc_attr($font_size).'">';
         }, 'mlcm_options', 'mlcm_main');
 
         add_settings_field('mlcm_custom_root_id', 'Custom Root Category ID', function() {
-            $custom_root_id = get_option('mlcm_custom_root_id', '');
+            $custom_root_id = absint(get_option('mlcm_custom_root_id', 0));
             echo '<input type="text" name="mlcm_custom_root_id" value="' . esc_attr($custom_root_id) . '">';
             echo '<p class="description">Specify the ID of the category whose subcategories will be used as the first level of the menu. Leave blank to use root categories.</p>';
         }, 'mlcm_options', 'mlcm_main');
 
         add_settings_field('mlcm_layout', 'Menu Layout', function() {
-            $layout = get_option('mlcm_menu_layout', 'vertical');
+            $layout = sanitize_text_field(get_option('mlcm_menu_layout', 'vertical'));
             echo '<select name="mlcm_menu_layout">
                 <option value="vertical" '.selected($layout, 'vertical', false).'>Vertical</option>
                 <option value="horizontal" '.selected($layout, 'horizontal', false).'>Horizontal</option>
@@ -349,13 +383,13 @@ class Multi_Level_Category_Menu {
         }, 'mlcm_options', 'mlcm_main');
 
         add_settings_field('mlcm_levels', 'Initial Levels', function() {
-            $levels = get_option('mlcm_initial_levels', 3);
-            echo '<input type="number" min="1" max="5" name="mlcm_initial_levels" value="'.absint($levels).'">';
+            $levels = absint(get_option('mlcm_initial_levels', 3));
+            echo '<input type="number" min="1" max="5" name="mlcm_initial_levels" value="'.esc_attr($levels).'">';
         }, 'mlcm_options', 'mlcm_main');
 
         add_settings_field('mlcm_width', 'Menu Width (px)', function() {
-            $width = get_option('mlcm_menu_width', 250);
-            echo '<input type="number" min="100" step="10" name="mlcm_menu_width" value="'.absint($width).'">';
+            $width = absint(get_option('mlcm_menu_width', 250));
+            echo '<input type="number" min="100" step="10" name="mlcm_menu_width" value="'.esc_attr($width).'">';
         }, 'mlcm_options', 'mlcm_main');
 
         add_settings_field('mlcm_show_button', 'Show Go Button', function() {
@@ -369,7 +403,7 @@ class Multi_Level_Category_Menu {
         }, 'mlcm_options', 'mlcm_main');
 
         add_settings_field('mlcm_exclude', 'Excluded Categories', function() {
-            $excluded = get_option('mlcm_excluded_cats', '');
+            $excluded = sanitize_text_field(get_option('mlcm_excluded_cats', ''));
             echo '<input type="text" name="mlcm_excluded_cats" 
                 placeholder="Comma-separated IDs" value="'.esc_attr($excluded).'">';
         }, 'mlcm_options', 'mlcm_main');
@@ -379,7 +413,7 @@ class Multi_Level_Category_Menu {
                 "mlcm_label_{$i}", 
                 "Level {$i} Label",
                 function() use ($i) {
-                    $label = get_option("mlcm_level_{$i}_label", "Level {$i}");
+                    $label = sanitize_text_field(get_option("mlcm_level_{$i}_label", "Level {$i}"));
                     echo '<input type="text" name="mlcm_level_'.$i.'_label" 
                         value="'.esc_attr($label).'">';
                 },
@@ -402,14 +436,14 @@ class Multi_Level_Category_Menu {
             'mlcm-frontend', 
             plugins_url('assets/css/frontend.css', __FILE__),
             [],
-            '3.5'
+            '3.5.1'
         );
         
         wp_enqueue_script(
             'mlcm-frontend', 
             plugins_url('assets/js/frontend.js', __FILE__), 
             ['jquery'], 
-            '3.5',
+            '3.5.1',
             true
         );
         
