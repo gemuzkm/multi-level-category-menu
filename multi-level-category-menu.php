@@ -2,7 +2,7 @@
 /*
 Plugin Name: Multi-Level Category Menu
 Description: Creates customizable category menus with 5-level depth
-Version: 3.4
+Version: 3.5
 Author: Name
 Text Domain: mlcm
 */
@@ -11,6 +11,8 @@ defined('ABSPATH') || exit;
 
 class Multi_Level_Category_Menu {
     private static $instance;
+    private $options_cache = null; // Кеш настроек
+    private $nonce_cache = null;   // Кеш nonce
 
     public static function get_instance() {
         if (!isset(self::$instance)) {
@@ -33,6 +35,60 @@ class Multi_Level_Category_Menu {
         add_action('edited_category', [$this, 'clear_related_cache']);
         add_action('create_category', [$this, 'clear_related_cache']);
         add_action('admin_enqueue_scripts', [$this, 'enqueue_admin_assets']);
+    }
+
+    /**
+     * Get all plugin options with caching
+     */
+    private function get_options() {
+        if (null === $this->options_cache) {
+            $this->options_cache = [
+                'font_size' => get_option('mlcm_font_size', ''),
+                'container_gap' => get_option('mlcm_container_gap', ''),
+                'button_bg_color' => get_option('mlcm_button_bg_color', ''),
+                'button_font_size' => get_option('mlcm_button_font_size', ''),
+                'button_hover_bg_color' => get_option('mlcm_button_hover_bg_color', ''),
+                'menu_layout' => get_option('mlcm_menu_layout', 'vertical'),
+                'initial_levels' => absint(get_option('mlcm_initial_levels', 3)),
+                'menu_width' => absint(get_option('mlcm_menu_width', 250)),
+                'show_button' => get_option('mlcm_show_button', '0') === '1',
+                'use_category_base' => get_option('mlcm_use_category_base', '1') === '1',
+                'custom_root_id' => get_option('mlcm_custom_root_id', ''),
+                'excluded_cats' => get_option('mlcm_excluded_cats', ''),
+                'labels' => array_map(function($i) {
+                    return get_option("mlcm_level_{$i}_label", "Level {$i}");
+                }, range(1, 5))
+            ];
+        }
+        return $this->options_cache;
+    }
+
+    /**
+     * Generate inline CSS from options
+     */
+    private function generate_inline_css($options) {
+        $css = [];
+        
+        if (!empty($options['menu_width'])) {
+            $css[] = ".mlcm-select{width:{$options['menu_width']}px}";
+        }
+        if (!empty($options['font_size'])) {
+            $css[] = ".mlcm-select{font-size:{$options['font_size']}rem}";
+        }
+        if (!empty($options['container_gap'])) {
+            $css[] = ".mlcm-container{gap:{$options['container_gap']}px}";
+        }
+        if (!empty($options['button_bg_color'])) {
+            $css[] = ".mlcm-go-button{background:{$options['button_bg_color']}}";
+        }
+        if (!empty($options['button_font_size'])) {
+            $css[] = ".mlcm-go-button{font-size:{$options['button_font_size']}rem}";
+        }
+        if (!empty($options['button_hover_bg_color'])) {
+            $css[] = ".mlcm-go-button:hover{background:{$options['button_hover_bg_color']}}";
+        }
+        
+        return implode('', $css);
     }
 
     public function register_gutenberg_block() {
@@ -60,34 +116,37 @@ class Multi_Level_Category_Menu {
     }
 
     /**
-    * Setup secure cookie-based nonce
-    * Returns the nonce value (new or existing)
-    */
+     * Setup secure cookie-based nonce with memory cache
+     */
     public function setup_cookie_nonce() {
+        if (null !== $this->nonce_cache) {
+            return $this->nonce_cache;
+        }
+        
         $cookie_name = 'mlcm_nonce';
-    
-        // Проверяем существующий cookie
+        
         if (isset($_COOKIE[$cookie_name])) {
             $cookie_nonce = sanitize_text_field($_COOKIE[$cookie_name]);
             if (wp_verify_nonce($cookie_nonce, 'mlcm_nonce')) {
-                return $cookie_nonce; // Возвращаем валидный
+                $this->nonce_cache = $cookie_nonce;
+                return $cookie_nonce;
             }
         }
-    
-        // Генерируем новый
+        
         $new_nonce = wp_create_nonce('mlcm_nonce');
-    
+        
         setcookie(
             $cookie_name,
             $new_nonce,
-            time() + (5 * DAY_IN_SECONDS),
+            time() + DAY_IN_SECONDS,
             COOKIEPATH,
             COOKIE_DOMAIN,
             is_ssl(),
             true
         );
-    
-        return $new_nonce; // ← ВАЖНО! Возвращаем новый nonce
+        
+        $this->nonce_cache = $new_nonce;
+        return $new_nonce;
     }
 
     public function render_gutenberg_block($attributes) {
@@ -100,25 +159,30 @@ class Multi_Level_Category_Menu {
     }
 
     public function shortcode_handler($atts) {
+        $options = $this->get_options();
+        
         $atts = shortcode_atts([
-            'layout' => get_option('mlcm_menu_layout', 'vertical'),
-            'levels' => absint(get_option('mlcm_initial_levels', 3))
+            'layout' => $options['menu_layout'],
+            'levels' => $options['initial_levels']
         ], $atts);
 
         return $this->generate_menu_html($atts);
     }
 
     private function generate_menu_html($atts) {
-        $show_button = get_option('mlcm_show_button', '0') === '1';
+        $options = $this->get_options();
+        $current_nonce = $this->setup_cookie_nonce();
+        
         ob_start(); ?>
         <div class="mlcm-container <?php echo esc_attr($atts['layout']); ?>" 
-             data-levels="<?php echo absint($atts['levels']); ?>">
+             data-levels="<?php echo absint($atts['levels']); ?>"
+             data-nonce="<?php echo esc_attr($current_nonce); ?>">
             <?php for($i = 1; $i <= $atts['levels']; $i++): ?>
                 <div class="mlcm-level" data-level="<?php echo $i; ?>">
                     <?php $this->render_select($i); ?>
                 </div>
             <?php endfor; ?>
-            <?php if ($show_button): ?>
+            <?php if ($options['show_button']): ?>
                 <button type="button" class="mlcm-go-button <?php echo esc_attr($atts['layout']); ?>">
                     <?php esc_html_e('Go', 'mlcm'); ?>
                 </button>
@@ -128,17 +192,16 @@ class Multi_Level_Category_Menu {
     }
 
     private function render_select($level) {
-        $label = get_option("mlcm_level_{$level}_label", "Level {$level}");
+        $options = $this->get_options();
+        $label = $options['labels'][$level - 1];
         $categories = ($level === 1) ? $this->get_root_categories() : [];
         $select_id = "mlcm-select-level-{$level}";
         ?>
         <select id="<?= esc_attr($select_id) ?>" class="mlcm-select" data-level="<?= $level ?>" 
                 <?= $level > 1 ? 'disabled' : '' ?>>
             <option value="-1"><?= esc_html($label) ?></option>
-            <?php foreach ($categories as $id => $data): 
-                $cat_link = get_category_link($id);
-            ?>
-                <option value="<?= absint($id) ?>" data-slug="<?= esc_attr($data['slug']) ?>" data-url="<?= esc_url($cat_link) ?>">
+            <?php foreach ($categories as $id => $data): ?>
+                <option value="<?= absint($id) ?>" data-slug="<?= esc_attr($data['slug']) ?>" data-url="<?= esc_url($data['url']) ?>">
                     <?= esc_html($data['name']) ?>
                 </option>
             <?php endforeach; ?>
@@ -147,75 +210,54 @@ class Multi_Level_Category_Menu {
     }
 
     private function get_root_categories() {
-        $custom_root_id = get_option('mlcm_custom_root_id', '');
-        if (!empty($custom_root_id) && is_numeric($custom_root_id)) {
-            $cache_key = 'mlcm_subcats_' . absint($custom_root_id);
-            $cache = get_transient($cache_key);
-            if (false === $cache) {
-                $excluded = array_map('absint', explode(',', get_option('mlcm_excluded_cats', '')));
-                $categories = get_categories([
-                    'parent' => absint($custom_root_id),
-                    'exclude' => $excluded,
-                    'hide_empty' => false,
-                    'orderby' => 'name',
-                    'order' => 'ASC',
-                    'fields' => 'all'
-                ]);
-
-                usort($categories, function($a, $b) {
-                    return strcasecmp($a->name, $b->name);
-                });
-
-                $cache = [];
-                foreach ($categories as $category) {
-                    $cache[$category->term_id] = [
-                        'name' => strtoupper(htmlspecialchars_decode($category->name)),
-                        'slug' => $category->slug
-                    ];
-                }
-                set_transient($cache_key, $cache, WEEK_IN_SECONDS);
-            }
-            return $cache;
-        } else {
-            $cache_key = 'mlcm_root_cats';
-            $cache = get_transient($cache_key);
-            if (false === $cache) {
-                $excluded = array_map('absint', explode(',', get_option('mlcm_excluded_cats', '')));
-                $categories = get_categories([
-                    'parent' => 0,
-                    'exclude' => $excluded,
-                    'hide_empty' => false,
-                    'orderby' => 'name',
-                    'order' => 'ASC',
-                    'fields' => 'all'
-                ]);
-
-                usort($categories, function($a, $b) {
-                    return strcasecmp($a->name, $b->name);
-                });
-
-                $cache = [];
-                foreach ($categories as $category) {
-                    $cache[$category->term_id] = [
-                        'name' => strtoupper(htmlspecialchars_decode($category->name)),
-                        'slug' => $category->slug
-                    ];
-                }
-                set_transient($cache_key, $cache, WEEK_IN_SECONDS);
-            }
+        $options = $this->get_options();
+        $custom_root_id = $options['custom_root_id'];
+        $excluded = array_filter(array_map('absint', explode(',', $options['excluded_cats'])));
+        
+        $parent = (!empty($custom_root_id) && is_numeric($custom_root_id)) 
+            ? absint($custom_root_id) 
+            : 0;
+        $cache_key = ($parent === 0) ? 'mlcm_root_cats' : "mlcm_subcats_{$parent}";
+        
+        $cache = get_transient($cache_key);
+        if (false !== $cache) {
             return $cache;
         }
+        
+        $categories = get_categories([
+            'parent' => $parent,
+            'exclude' => $excluded,
+            'hide_empty' => false,
+            'orderby' => 'name',
+            'order' => 'ASC',
+            'fields' => 'all'
+        ]);
+
+        usort($categories, function($a, $b) {
+            return strcasecmp($a->name, $b->name);
+        });
+
+        $result = [];
+        foreach ($categories as $category) {
+            $result[$category->term_id] = [
+                'name' => strtoupper(htmlspecialchars_decode($category->name)),
+                'slug' => $category->slug,
+                'url' => get_category_link($category->term_id)
+            ];
+        }
+        
+        set_transient($cache_key, $result, WEEK_IN_SECONDS);
+        
+        return $result;
     }
 
     public function ajax_handler() {
-        // Проверяем nonce из POST или вызываем setup_cookie_nonce() для получения текущего
         $nonce = sanitize_text_field($_POST['security'] ?? '');
-    
-        // Если nonce пустой, пытаемся получить из cookie
+        
         if (empty($nonce) && isset($_COOKIE['mlcm_nonce'])) {
             $nonce = sanitize_text_field($_COOKIE['mlcm_nonce']);
         }
-    
+        
         if (!wp_verify_nonce($nonce, 'mlcm_nonce')) {
             wp_send_json_error(['message' => 'Invalid nonce']);
             wp_die();
@@ -354,16 +396,20 @@ class Multi_Level_Category_Menu {
     }
 
     public function enqueue_frontend_assets() {
+        $options = $this->get_options();
+        
         wp_enqueue_style(
             'mlcm-frontend', 
-            plugins_url('assets/css/frontend.css', __FILE__)
+            plugins_url('assets/css/frontend.css', __FILE__),
+            [],
+            '3.5'
         );
         
         wp_enqueue_script(
             'mlcm-frontend', 
             plugins_url('assets/js/frontend.js', __FILE__), 
             ['jquery'], 
-            null, 
+            '3.5',
             true
         );
         
@@ -371,36 +417,12 @@ class Multi_Level_Category_Menu {
 
         wp_localize_script('mlcm-frontend', 'mlcmVars', [
             'ajax_url' => admin_url('admin-ajax.php'),
-            'nonce' => $current_nonce, // Pass nonce from cookie
-            'labels' => array_map(function($i) {
-                return get_option("mlcm_level_{$i}_label", "Level {$i}");
-            }, range(1,5)),
-            'use_category_base' => get_option('mlcm_use_category_base', '1') === '1',
+            'nonce' => $current_nonce,
+            'labels' => $options['labels'],
+            'use_category_base' => $options['use_category_base'],
         ]);
 
-        $font_size = get_option('mlcm_font_size', '');
-        $container_gap = get_option('mlcm_container_gap', '');
-        $button_bg_color = get_option('mlcm_button_bg_color', '');
-        $button_font_size = get_option('mlcm_button_font_size', '');
-        $button_hover_bg_color = get_option('mlcm_button_hover_bg_color', '');
-        
-        $custom_css = '';
-        if (!empty($font_size)) {
-            $custom_css .= ".mlcm-select { font-size: {$font_size}rem; }";
-        }
-        if (!empty($container_gap)) {
-            $custom_css .= ".mlcm-container { gap: {$container_gap}px; }";
-        }
-        if (!empty($button_bg_color)) {
-            $custom_css .= ".mlcm-go-button { background: {$button_bg_color}; }";
-        }
-        if (!empty($button_font_size)) {
-            $custom_css .= ".mlcm-go-button { font-size: {$button_font_size}rem; }";
-        }
-        if (!empty($button_hover_bg_color)) {
-            $custom_css .= ".mlcm-go-button:hover { background: {$button_hover_bg_color}; }";
-        }
-
+        $custom_css = $this->generate_inline_css($options);
         if (!empty($custom_css)) {
             wp_add_inline_style('mlcm-frontend', $custom_css);
         }
@@ -413,10 +435,7 @@ class Multi_Level_Category_Menu {
             if ($term->parent != 0) {
                 delete_transient("mlcm_subcats_{$term->parent}");
             } else {
-                $custom_root_id = get_option('mlcm_custom_root_id', '');
-                if (empty($custom_root_id)) {
-                    delete_transient('mlcm_root_cats');
-                }
+                delete_transient('mlcm_root_cats');
             }
         }
     }
@@ -458,11 +477,15 @@ class Multi_Level_Category_Menu {
     }
 
     public function register_widget() {
-        require_once __DIR__.'/includes/widget.php';
+        if (!class_exists('MLCM_Widget')) {
+            require_once __DIR__ . '/includes/widget.php';
+        }
         register_widget('MLCM_Widget');
     }
 
     public function enqueue_block_editor_assets() {
+        $options = $this->get_options();
+        
         wp_enqueue_script(
             'mlcm-block-editor',
             plugins_url('assets/js/block-editor.js', __FILE__),
@@ -471,8 +494,8 @@ class Multi_Level_Category_Menu {
         );
 
         wp_localize_script('mlcm-block-editor', 'mlcmBlockVars', [
-            'default_layout' => get_option('mlcm_menu_layout', 'vertical'),
-            'default_levels' => absint(get_option('mlcm_initial_levels', 3))
+            'default_layout' => $options['menu_layout'],
+            'default_levels' => $options['initial_levels']
         ]);
     }
 
@@ -513,7 +536,3 @@ add_action('wp_ajax_mlcm_clear_all_caches', function() {
     wp_die();
 });
 
-add_action('wp_head', function() {
-    $width = get_option('mlcm_menu_width', 250);
-    echo '<style>.mlcm-select { width: '.absint($width).'px; }</style>';
-});
