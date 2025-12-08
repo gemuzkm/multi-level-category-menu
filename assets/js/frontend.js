@@ -1,42 +1,79 @@
 /**
- * Get nonce from data attribute, sessionStorage, or fallback
- * Priority: data-nonce > sessionStorage > window.mlcmNonce > mlcmVars.nonce
+ * Get nonce from cache or fetch fresh one
+ * Priority: sessionStorage > window.mlcmNonce > fetch from server
  */
-function getMlcmNonce() {
-    // ПРИОРИТЕТ 1: data-nonce в контейнере (самый надёжный)
-    const $container = document.querySelector('.mlcm-container');
-    if ($container && $container.dataset.nonce) {
-        sessionStorage.setItem('mlcm_nonce', $container.dataset.nonce);
-        window.mlcmNonce = $container.dataset.nonce;
-        return $container.dataset.nonce;
-    }
-    
-    // ПРИОРИТЕТ 2: sessionStorage (сохранено из data-nonce)
+function getMlcmNonce(callback) {
+    // Если nonce уже есть в кэше, возвращаем его
     const stored = sessionStorage.getItem('mlcm_nonce');
     if (stored) {
         window.mlcmNonce = stored;
+        if (typeof callback === 'function') {
+            callback(stored);
+        }
         return stored;
     }
     
-    // ПРИОРИТЕТ 3: window переменная (установлено ранее)
+    // Если есть в window переменной
     if (typeof window.mlcmNonce !== 'undefined' && window.mlcmNonce) {
+        if (typeof callback === 'function') {
+            callback(window.mlcmNonce);
+        }
         return window.mlcmNonce;
     }
     
-    // ПРИОРИТЕТ 4: mlcmVars.nonce (fallback)
-    return (typeof mlcmVars !== 'undefined' ? mlcmVars.nonce : '');
+    // Иначе получаем с сервера
+    fetchFreshNonce(callback);
+    return null;
+}
+
+/**
+ * Fetch fresh nonce from server
+ */
+function fetchFreshNonce(callback) {
+    if (typeof mlcmVars === 'undefined' || !mlcmVars.ajax_url) {
+        console.error('MLCM: mlcmVars not defined');
+        if (typeof callback === 'function') {
+            callback('');
+        }
+        return;
+    }
+    
+    jQuery.ajax({
+        url: mlcmVars.ajax_url,
+        method: 'POST',
+        data: {
+            action: 'mlcm_get_nonce'
+        },
+        success: (response) => {
+            if (response.success && response.data.nonce) {
+                const nonce = response.data.nonce;
+                sessionStorage.setItem('mlcm_nonce', nonce);
+                window.mlcmNonce = nonce;
+                if (typeof callback === 'function') {
+                    callback(nonce);
+                }
+            } else {
+                console.error('MLCM: Failed to get nonce');
+                if (typeof callback === 'function') {
+                    callback('');
+                }
+            }
+        },
+        error: () => {
+            console.error('MLCM: Error fetching nonce');
+            if (typeof callback === 'function') {
+                callback('');
+            }
+        }
+    });
 }
 
 jQuery(function($) {
     const $container = $('.mlcm-container');
     if (!$container.length) return; // Early exit
 
-    // Сохраняем nonce в sessionStorage при загрузке
-    const dataNonce = $container.attr('data-nonce');
-    if (dataNonce) {
-        sessionStorage.setItem('mlcm_nonce', dataNonce);
-        window.mlcmNonce = dataNonce;
-    }
+    // Получаем nonce при загрузке страницы
+    getMlcmNonce();
 
     // Remove duplicate buttons (оптимизировано)
     const $buttons = $container.find('.mlcm-go-button');
@@ -79,36 +116,62 @@ jQuery(function($) {
     }
 
     // Loading subcategories (оптимизировано)
-    function loadSubcategories($select, level, parentId) {
+    function loadSubcategories($select, level, parentId, retryCount = 0) {
         const maxLevels = $container.data('levels');
         if (level >= maxLevels) {
             redirectToCategory();
             return;
         }
 
-        const currentNonce = getMlcmNonce();
-
-        $.ajax({
-            url: mlcmVars.ajax_url,
-            method: 'POST',
-            data: {
-                action: 'mlcm_get_subcategories',
-                parent_id: parentId,
-                security: currentNonce
-            },
-            beforeSend: () => {
-                $select.nextAll('.mlcm-select').val('-1').prop('disabled', true);
-            },
-            success: (response) => {
-                if (response.success && Object.keys(response.data).length > 0) {
-                    updateNextLevel($select, level, response.data);
-                } else {
-                    redirectToCategory();
-                }
-            },
-            error: () => {
-                console.error('MLCM: Failed to load subcategories');
+        // Получаем nonce асинхронно
+        getMlcmNonce(function(currentNonce) {
+            if (!currentNonce) {
+                console.error('MLCM: Could not get nonce');
+                return;
             }
+
+            $.ajax({
+                url: mlcmVars.ajax_url,
+                method: 'POST',
+                data: {
+                    action: 'mlcm_get_subcategories',
+                    parent_id: parentId,
+                    security: currentNonce
+                },
+                beforeSend: () => {
+                    $select.nextAll('.mlcm-select').val('-1').prop('disabled', true);
+                },
+                success: (response) => {
+                    // Проверяем ошибку nonce и повторяем запрос
+                    if (!response.success && response.data && response.data.code === 'invalid_nonce' && response.data.retry) {
+                        if (retryCount < 2) {
+                            // Очищаем кэш nonce и получаем новый
+                            sessionStorage.removeItem('mlcm_nonce');
+                            delete window.mlcmNonce;
+                            
+                            // Повторяем запрос с новым nonce
+                            setTimeout(function() {
+                                loadSubcategories($select, level, parentId, retryCount + 1);
+                            }, 100);
+                            return;
+                        } else {
+                            console.error('MLCM: Failed to get valid nonce after retries');
+                            return;
+                        }
+                    }
+                    
+                    // Обрабатываем успешный ответ
+                    if (response.success && response.data && Object.keys(response.data).length > 0) {
+                        updateNextLevel($select, level, response.data);
+                    } else {
+                        // Если нет подкатегорий, делаем редирект
+                        redirectToCategory();
+                    }
+                },
+                error: (xhr, status, error) => {
+                    console.error('MLCM: Failed to load subcategories', error);
+                }
+            });
         });
     }
 

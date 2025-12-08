@@ -32,6 +32,8 @@ class Multi_Level_Category_Menu {
         add_action('admin_menu', [$this, 'add_admin_menu']);
         add_action('wp_ajax_mlcm_get_subcategories', [$this, 'ajax_handler']);
         add_action('wp_ajax_nopriv_mlcm_get_subcategories', [$this, 'ajax_handler']);
+        add_action('wp_ajax_mlcm_get_nonce', [$this, 'ajax_get_nonce']);
+        add_action('wp_ajax_nopriv_mlcm_get_nonce', [$this, 'ajax_get_nonce']);
         add_action('edited_category', [$this, 'clear_related_cache']);
         add_action('create_category', [$this, 'clear_related_cache']);
         add_action('admin_enqueue_scripts', [$this, 'enqueue_admin_assets']);
@@ -171,12 +173,10 @@ class Multi_Level_Category_Menu {
 
     private function generate_menu_html($atts) {
         $options = $this->get_options();
-        $current_nonce = $this->setup_cookie_nonce();
         
         ob_start(); ?>
         <div class="mlcm-container <?php echo esc_attr($atts['layout']); ?>" 
-             data-levels="<?php echo absint($atts['levels']); ?>"
-             data-nonce="<?php echo esc_attr($current_nonce); ?>">
+             data-levels="<?php echo absint($atts['levels']); ?>">
             <?php for($i = 1; $i <= $atts['levels']; $i++): ?>
                 <div class="mlcm-level" data-level="<?php echo $i; ?>">
                     <?php $this->render_select($i); ?>
@@ -259,6 +259,16 @@ class Multi_Level_Category_Menu {
         return $result;
     }
 
+    /**
+     * AJAX handler for getting fresh nonce
+     * This endpoint doesn't require nonce verification as it's used to get a nonce
+     */
+    public function ajax_get_nonce() {
+        $new_nonce = $this->setup_cookie_nonce();
+        wp_send_json_success(['nonce' => $new_nonce]);
+        wp_die();
+    }
+
     public function ajax_handler() {
         $nonce = sanitize_text_field($_POST['security'] ?? '');
         
@@ -266,8 +276,13 @@ class Multi_Level_Category_Menu {
             $nonce = sanitize_text_field($_COOKIE['mlcm_nonce']);
         }
         
+        // Если nonce невалиден, возвращаем ошибку с кодом для повторной попытки
         if (!wp_verify_nonce($nonce, 'mlcm_nonce')) {
-            wp_send_json_error(['message' => 'Invalid nonce']);
+            wp_send_json_error([
+                'message' => 'Invalid nonce',
+                'code' => 'invalid_nonce',
+                'retry' => true
+            ]);
             wp_die();
         }
 
@@ -447,11 +462,8 @@ class Multi_Level_Category_Menu {
             true
         );
         
-        $current_nonce = $this->setup_cookie_nonce();
-
         wp_localize_script('mlcm-frontend', 'mlcmVars', [
             'ajax_url' => admin_url('admin-ajax.php'),
-            'nonce' => $current_nonce,
             'labels' => $options['labels'],
             'use_category_base' => $options['use_category_base'],
         ]);
