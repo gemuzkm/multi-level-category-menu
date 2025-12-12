@@ -30,6 +30,11 @@
 .mlcm-select:disabled {
     opacity: 0.6;
     background: #f5f5f5;
+    cursor: wait;
+}
+
+.mlcm-select option[value="-1"] {
+    font-style: italic;
 }
 
 .mlcm-go-button {

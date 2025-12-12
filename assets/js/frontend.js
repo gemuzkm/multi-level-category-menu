@@ -72,8 +72,8 @@ jQuery(function($) {
     const $container = $('.mlcm-container');
     if (!$container.length) return; // Early exit
 
-    // Получаем nonce при загрузке страницы
-    getMlcmNonce();
+    // Получаем nonce при загрузке страницы (ленивая загрузка)
+    // Nonce будет получен при первом использовании меню
 
     // Remove duplicate buttons (оптимизировано)
     const $buttons = $container.find('.mlcm-go-button');
@@ -87,19 +87,25 @@ jQuery(function($) {
     if (gap) $container[0].style.setProperty('--mlcm-gap', `${gap}px`);
     if (fontSize) $container[0].style.setProperty('--mlcm-font-size', fontSize);
 
-    // Handler of changes in selections
+    // Debounce для обработки изменений select
+    let changeTimeout;
     $container.on('change', '.mlcm-select', function() {
         const $select = $(this);
         const level = $select.data('level');
         const $selectedOption = $select.find('option:selected');
         const parentId = $selectedOption.val();
         
+        clearTimeout(changeTimeout);
+        
         if (parentId === '-1') {
             resetLevels(level);
             return;
         }
         
-        loadSubcategories($select, level, parentId);
+        // Небольшая задержка для предотвращения множественных запросов
+        changeTimeout = setTimeout(() => {
+            loadSubcategories($select, level, parentId);
+        }, 150);
     });
 
     // Button click handler
@@ -115,6 +121,20 @@ jQuery(function($) {
         });
     }
 
+    // Показать индикатор загрузки
+    function showLoading($select) {
+        const $nextSelect = $select.next('.mlcm-level').find('.mlcm-select');
+        if ($nextSelect.length) {
+            $nextSelect.prop('disabled', true)
+                .html('<option value="-1">Loading...</option>');
+        }
+    }
+
+    // Скрыть индикатор загрузки
+    function hideLoading() {
+        // Уже обрабатывается в updateNextLevel
+    }
+
     // Loading subcategories (оптимизировано)
     function loadSubcategories($select, level, parentId, retryCount = 0) {
         const maxLevels = $container.data('levels');
@@ -123,10 +143,14 @@ jQuery(function($) {
             return;
         }
 
+        // Показываем индикатор загрузки
+        showLoading($select);
+
         // Получаем nonce асинхронно
         getMlcmNonce(function(currentNonce) {
             if (!currentNonce) {
                 console.error('MLCM: Could not get nonce');
+                hideLoading();
                 return;
             }
 
@@ -156,6 +180,7 @@ jQuery(function($) {
                             return;
                         } else {
                             console.error('MLCM: Failed to get valid nonce after retries');
+                            hideLoading();
                             return;
                         }
                     }
@@ -165,17 +190,20 @@ jQuery(function($) {
                         updateNextLevel($select, level, response.data);
                     } else {
                         // Если нет подкатегорий, делаем редирект
+                        hideLoading();
                         redirectToCategory();
                     }
                 },
                 error: (xhr, status, error) => {
                     console.error('MLCM: Failed to load subcategories', error);
+                    hideLoading();
                 }
             });
         });
     }
 
     // Next level update (оптимизировано)
+    // Убрана двойная сортировка - данные уже отсортированы на сервере
     function updateNextLevel($select, currentLevel, categories) {
         const nextLevel = currentLevel + 1;
         const $nextSelect = $(`.mlcm-select[data-level="${nextLevel}"]`);
@@ -183,10 +211,9 @@ jQuery(function($) {
         if (!$nextSelect.length) return;
         
         const label = mlcmVars.labels[nextLevel - 1];
-        const sortedEntries = Object.entries(categories)
-            .sort((a, b) => a[1].name.localeCompare(b[1].name, undefined, { sensitivity: 'base' }));
         
-        const options = sortedEntries.map(([id, data]) => 
+        // Данные уже отсортированы на сервере, просто создаем опции
+        const options = Object.entries(categories).map(([id, data]) => 
             `<option value="${id}" data-slug="${data.slug}" data-url="${data.url}">${data.name}</option>`
         ).join('');
         
@@ -202,7 +229,10 @@ jQuery(function($) {
         
         if ($lastSelect.length) {
             const url = $lastSelect.find('option:selected').data('url');
-            if (url) window.location.href = url;
+            // Валидация URL перед редиректом
+            if (url && url.startsWith('http')) {
+                window.location.href = url;
+            }
         }
     }
 
