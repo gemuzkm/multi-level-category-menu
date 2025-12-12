@@ -120,7 +120,43 @@ class Multi_Level_Category_Menu {
     }
 
     /**
+     * Prevent caching for AJAX requests
+     * Compatible with FlyingPress, WP Rocket, and other caching plugins
+     */
+    private function prevent_caching() {
+        // Устанавливаем заголовки для предотвращения кэширования
+        if (!headers_sent()) {
+            header('Cache-Control: no-cache, no-store, must-revalidate, max-age=0');
+            header('Pragma: no-cache');
+            header('Expires: 0');
+            
+            // Для FlyingPress
+            if (function_exists('flying_press_bypass')) {
+                flying_press_bypass();
+            }
+            
+            // Для WP Rocket
+            if (defined('WP_ROCKET_VERSION')) {
+                define('DONOTCACHEPAGE', true);
+            }
+            
+            // Для W3 Total Cache
+            if (defined('W3TC')) {
+                define('DONOTCACHEPAGE', true);
+                define('DONOTCACHEOBJECT', true);
+                define('DONOTCACHEDB', true);
+            }
+            
+            // Для WP Super Cache
+            if (defined('WPCACHEHOME')) {
+                define('DONOTCACHEPAGE', true);
+            }
+        }
+    }
+
+    /**
      * Setup secure cookie-based nonce with memory cache
+     * Compatible with cached pages - nonce is generated dynamically via AJAX
      */
     public function setup_cookie_nonce() {
         if (null !== $this->nonce_cache) {
@@ -129,20 +165,26 @@ class Multi_Level_Category_Menu {
         
         $cookie_name = 'mlcm_nonce';
         
+        // Проверяем cookie (работает даже на кэшированных страницах)
         if (isset($_COOKIE[$cookie_name])) {
             $cookie_nonce = sanitize_text_field($_COOKIE[$cookie_name]);
+            
+            // Проверяем валидность nonce
+            // wp_verify_nonce проверяет и формат, и срок действия
             if (wp_verify_nonce($cookie_nonce, 'mlcm_nonce')) {
                 $this->nonce_cache = $cookie_nonce;
                 return $cookie_nonce;
             }
         }
         
+        // Создаем новый nonce
         $new_nonce = wp_create_nonce('mlcm_nonce');
         
+        // Устанавливаем cookie с увеличенным временем жизни для кэшированных страниц
         setcookie(
             $cookie_name,
             $new_nonce,
-            time() + DAY_IN_SECONDS,
+            time() + (2 * DAY_IN_SECONDS), // 48 часов вместо 24
             COOKIEPATH,
             COOKIE_DOMAIN,
             is_ssl(),
@@ -152,6 +194,7 @@ class Multi_Level_Category_Menu {
         $this->nonce_cache = $new_nonce;
         return $new_nonce;
     }
+    
 
     public function render_gutenberg_block($attributes) {
         $atts = shortcode_atts([
@@ -176,9 +219,13 @@ class Multi_Level_Category_Menu {
     private function generate_menu_html($atts) {
         $options = $this->get_options();
         
+        // НЕ встраиваем nonce в HTML для совместимости с кэшированием
+        // Nonce будет получен динамически через AJAX при первом использовании
+        
         ob_start(); ?>
         <div class="mlcm-container <?php echo esc_attr($atts['layout']); ?>" 
-             data-levels="<?php echo absint($atts['levels']); ?>">
+             data-levels="<?php echo absint($atts['levels']); ?>"
+             data-cached="<?php echo (defined('WP_CACHE') && WP_CACHE) ? '1' : '0'; ?>">
             <?php for($i = 1; $i <= $atts['levels']; $i++): ?>
                 <div class="mlcm-level" data-level="<?php echo $i; ?>">
                     <?php $this->render_select($i); ?>
@@ -229,6 +276,7 @@ class Multi_Level_Category_Menu {
         $parent = ($custom_root_id > 0) ? $custom_root_id : 0;
         $cache_key = ($parent === 0) ? 'mlcm_root_cats' : "mlcm_subcats_{$parent}";
         
+        // Используем get_transient, который автоматически работает с Redis Object Cache
         $cache = get_transient($cache_key);
         if (false !== $cache) {
             return $cache;
@@ -253,6 +301,8 @@ class Multi_Level_Category_Menu {
             ];
         }
         
+        // Используем set_transient, который автоматически работает с Redis Object Cache
+        // Если Redis недоступен, будет использован стандартный WordPress кэш
         set_transient($cache_key, $result, WEEK_IN_SECONDS);
         
         return $result;
@@ -263,12 +313,18 @@ class Multi_Level_Category_Menu {
      * This endpoint doesn't require nonce verification as it's used to get a nonce
      */
     public function ajax_get_nonce() {
+        // Исключаем из кэша FlyingPress и других кэширующих плагинов
+        $this->prevent_caching();
+        
         $new_nonce = $this->setup_cookie_nonce();
         wp_send_json_success(['nonce' => $new_nonce]);
         wp_die();
     }
 
     public function ajax_handler() {
+        // Исключаем из кэша FlyingPress и других кэширующих плагинов
+        $this->prevent_caching();
+        
         $nonce = sanitize_text_field($_POST['security'] ?? '');
         
         if (empty($nonce) && isset($_COOKIE['mlcm_nonce'])) {
@@ -295,6 +351,7 @@ class Multi_Level_Category_Menu {
         
         $cache_key = "mlcm_subcats_{$parent_id}";
         
+        // Используем get_transient, который автоматически работает с Redis Object Cache
         if (false === ($response = get_transient($cache_key))) {
             $options = $this->get_options();
             $excluded_str = $options['excluded_cats'];
@@ -324,6 +381,7 @@ class Multi_Level_Category_Menu {
                     'url' => get_category_link($category->term_id)
                 ];
             }
+            // Используем set_transient, который автоматически работает с Redis Object Cache
             set_transient($cache_key, $response, WEEK_IN_SECONDS);
         }
         
@@ -547,12 +605,27 @@ class Multi_Level_Category_Menu {
 
     public function clear_all_caches() {
         global $wpdb;
+        
+        // Удаляем через delete_transient (работает с Redis Object Cache)
         delete_transient('mlcm_root_cats');
+        
+        // Также удаляем напрямую из БД для совместимости
+        // Redis Object Cache автоматически синхронизирует это
         $result = $wpdb->query(
-            "DELETE FROM $wpdb->options 
-            WHERE option_name LIKE '_transient_mlcm_subcats_%' 
-            OR option_name LIKE '_transient_timeout_mlcm_subcats_%'"
+            $wpdb->prepare(
+                "DELETE FROM $wpdb->options 
+                WHERE option_name LIKE %s 
+                OR option_name LIKE %s",
+                $wpdb->esc_like('_transient_mlcm_subcats_') . '%',
+                $wpdb->esc_like('_transient_timeout_mlcm_subcats_') . '%'
+            )
         );
+        
+        // Очищаем кэш Redis, если используется
+        if (function_exists('wp_cache_flush_group')) {
+            wp_cache_flush_group('transient');
+        }
+        
         return $result !== false;
     }
 

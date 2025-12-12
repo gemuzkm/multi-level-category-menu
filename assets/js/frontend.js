@@ -26,54 +26,66 @@ function getMlcmNonce(callback) {
     return null;
 }
 
-/**
- * Fetch fresh nonce from server
- */
-function fetchFreshNonce(callback) {
-    if (typeof mlcmVars === 'undefined' || !mlcmVars.ajax_url) {
-        console.error('MLCM: mlcmVars not defined');
-        if (typeof callback === 'function') {
-            callback('');
+    /**
+     * Fetch fresh nonce from server
+     * Compatible with cached pages - always fetches fresh nonce
+     */
+    function fetchFreshNonce(callback) {
+        if (typeof mlcmVars === 'undefined' || !mlcmVars.ajax_url) {
+            console.error('MLCM: mlcmVars not defined');
+            if (typeof callback === 'function') {
+                callback('');
+            }
+            return;
         }
-        return;
-    }
-    
-    jQuery.ajax({
-        url: mlcmVars.ajax_url,
-        method: 'POST',
-        data: {
-            action: 'mlcm_get_nonce'
-        },
-        success: (response) => {
-            if (response.success && response.data.nonce) {
-                const nonce = response.data.nonce;
-                sessionStorage.setItem('mlcm_nonce', nonce);
-                window.mlcmNonce = nonce;
-                if (typeof callback === 'function') {
-                    callback(nonce);
+        
+        // Добавляем timestamp для предотвращения кэширования запроса
+        const timestamp = new Date().getTime();
+        
+        jQuery.ajax({
+            url: mlcmVars.ajax_url,
+            method: 'POST',
+            cache: false, // Явно отключаем кэширование
+            data: {
+                action: 'mlcm_get_nonce',
+                _t: timestamp // Timestamp для предотвращения кэширования
+            },
+            success: (response) => {
+                if (response.success && response.data && response.data.nonce) {
+                    const nonce = response.data.nonce;
+                    sessionStorage.setItem('mlcm_nonce', nonce);
+                    window.mlcmNonce = nonce;
+                    if (typeof callback === 'function') {
+                        callback(nonce);
+                    }
+                } else {
+                    console.error('MLCM: Failed to get nonce', response);
+                    if (typeof callback === 'function') {
+                        callback('');
+                    }
                 }
-            } else {
-                console.error('MLCM: Failed to get nonce');
+            },
+            error: (xhr, status, error) => {
+                console.error('MLCM: Error fetching nonce', error);
                 if (typeof callback === 'function') {
                     callback('');
                 }
             }
-        },
-        error: () => {
-            console.error('MLCM: Error fetching nonce');
-            if (typeof callback === 'function') {
-                callback('');
-            }
-        }
-    });
-}
+        });
+    }
 
 jQuery(function($) {
     const $container = $('.mlcm-container');
     if (!$container.length) return; // Early exit
 
-    // Получаем nonce при загрузке страницы (ленивая загрузка)
-    // Nonce будет получен при первом использовании меню
+    // Проверяем, закэширована ли страница
+    const isCached = $container.data('cached') === 1 || $container.data('cached') === '1';
+    
+    // Для кэшированных страниц получаем nonce заранее
+    // Для некэшированных - получим при первом использовании
+    if (isCached) {
+        getMlcmNonce(); // Предзагрузка nonce для кэшированных страниц
+    }
 
     // Remove duplicate buttons (оптимизировано)
     const $buttons = $container.find('.mlcm-go-button');
@@ -157,10 +169,12 @@ jQuery(function($) {
             $.ajax({
                 url: mlcmVars.ajax_url,
                 method: 'POST',
+                cache: false, // Явно отключаем кэширование AJAX запросов
                 data: {
                     action: 'mlcm_get_subcategories',
                     parent_id: parentId,
-                    security: currentNonce
+                    security: currentNonce,
+                    _t: new Date().getTime() // Timestamp для предотвращения кэширования
                 },
                 beforeSend: () => {
                     $select.nextAll('.mlcm-select').val('-1').prop('disabled', true);
