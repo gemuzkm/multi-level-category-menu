@@ -25,7 +25,7 @@ class Multi_Level_Category_Menu {
         add_shortcode('mlcm_menu', [$this, 'shortcode_handler']);
         add_action('widgets_init', [$this, 'register_widget']);
         add_action('init', [$this, 'register_gutenberg_block']);
-        // Убираем setup_cookie_nonce из init - будет вызываться только при необходимости
+        // Remove setup_cookie_nonce from init - will be called only when needed
         add_action('wp_enqueue_scripts', [$this, 'enqueue_frontend_assets']);
         add_action('enqueue_block_editor_assets', [$this, 'enqueue_block_editor_assets']);
         add_action('admin_init', [$this, 'register_settings']);
@@ -72,7 +72,7 @@ class Multi_Level_Category_Menu {
     private function generate_inline_css($options) {
         $css = [];
         
-        // Оптимизированная генерация CSS с проверками
+        // Optimized CSS generation with validation
         if (!empty($options['menu_width']) && $options['menu_width'] > 0) {
             $css[] = ".mlcm-select{width:{$options['menu_width']}px}";
         }
@@ -124,30 +124,30 @@ class Multi_Level_Category_Menu {
      * Compatible with FlyingPress, WP Rocket, and other caching plugins
      */
     private function prevent_caching() {
-        // Устанавливаем заголовки для предотвращения кэширования
+        // Set headers to prevent caching
         if (!headers_sent()) {
             header('Cache-Control: no-cache, no-store, must-revalidate, max-age=0');
             header('Pragma: no-cache');
             header('Expires: 0');
             
-            // Для FlyingPress
+            // For FlyingPress
             if (function_exists('flying_press_bypass')) {
                 flying_press_bypass();
             }
             
-            // Для WP Rocket
+            // For WP Rocket
             if (defined('WP_ROCKET_VERSION')) {
                 define('DONOTCACHEPAGE', true);
             }
             
-            // Для W3 Total Cache
+            // For W3 Total Cache
             if (defined('W3TC')) {
                 define('DONOTCACHEPAGE', true);
                 define('DONOTCACHEOBJECT', true);
                 define('DONOTCACHEDB', true);
             }
             
-            // Для WP Super Cache
+            // For WP Super Cache
             if (defined('WPCACHEHOME')) {
                 define('DONOTCACHEPAGE', true);
             }
@@ -165,26 +165,26 @@ class Multi_Level_Category_Menu {
         
         $cookie_name = 'mlcm_nonce';
         
-        // Проверяем cookie (работает даже на кэшированных страницах)
+        // Check cookie (works even on cached pages)
         if (isset($_COOKIE[$cookie_name])) {
             $cookie_nonce = sanitize_text_field($_COOKIE[$cookie_name]);
             
-            // Проверяем валидность nonce
-            // wp_verify_nonce проверяет и формат, и срок действия
+            // Verify nonce validity
+            // wp_verify_nonce checks both format and expiration
             if (wp_verify_nonce($cookie_nonce, 'mlcm_nonce')) {
                 $this->nonce_cache = $cookie_nonce;
                 return $cookie_nonce;
             }
         }
         
-        // Создаем новый nonce
+        // Create new nonce
         $new_nonce = wp_create_nonce('mlcm_nonce');
         
-        // Устанавливаем cookie с увеличенным временем жизни для кэшированных страниц
+        // Set cookie with extended lifetime for cached pages
         setcookie(
             $cookie_name,
             $new_nonce,
-            time() + (2 * DAY_IN_SECONDS), // 48 часов вместо 24
+            time() + (2 * DAY_IN_SECONDS), // 48 hours instead of 24
             COOKIEPATH,
             COOKIE_DOMAIN,
             is_ssl(),
@@ -219,8 +219,8 @@ class Multi_Level_Category_Menu {
     private function generate_menu_html($atts) {
         $options = $this->get_options();
         
-        // НЕ встраиваем nonce в HTML для совместимости с кэшированием
-        // Nonce будет получен динамически через AJAX при первом использовании
+        // Do NOT embed nonce in HTML for caching compatibility
+        // Nonce will be fetched dynamically via AJAX on first use
         
         ob_start(); ?>
         <div class="mlcm-container <?php echo esc_attr($atts['layout']); ?>" 
@@ -268,7 +268,7 @@ class Multi_Level_Category_Menu {
         $options = $this->get_options();
         $excluded_str = $options['excluded_cats'];
         
-        // Безопасное преобразование строки в массив ID
+        // Safe conversion of string to array of IDs
         $excluded = [];
         if (!empty($excluded_str)) {
             $excluded = array_filter(
@@ -276,7 +276,7 @@ class Multi_Level_Category_Menu {
             );
         }
         
-        // Получаем категории (orderby используется для предварительной сортировки)
+        // Get categories (orderby is used for preliminary sorting)
         $categories = get_categories([
             'parent' => $parent_id,
             'exclude' => $excluded,
@@ -289,7 +289,7 @@ class Multi_Level_Category_Menu {
         $result = [];
         foreach ($categories as $category) {
             if (!isset($category->term_id) || !isset($category->name)) {
-                continue; // Пропускаем некорректные данные
+                continue; // Skip invalid data
             }
             
             $result[$category->term_id] = [
@@ -299,8 +299,8 @@ class Multi_Level_Category_Menu {
             ];
         }
         
-        // Принудительная сортировка по именам после преобразования в верхний регистр
-        // Это гарантирует правильный порядок независимо от порядка в БД
+        // Force sort by names after converting to uppercase
+        // This ensures correct order regardless of database order
         $this->sort_categories($result);
         
         return $result;
@@ -316,8 +316,8 @@ class Multi_Level_Category_Menu {
             return;
         }
         
-        // Принудительная сортировка через uasort
-        // Проверяем структуру данных перед сортировкой
+        // Force sort using uasort
+        // Check data structure before sorting
         $is_valid = true;
         foreach ($categories as $key => $value) {
             if (!is_array($value) || !isset($value['name'])) {
@@ -327,32 +327,32 @@ class Multi_Level_Category_Menu {
         }
         
         if (!$is_valid) {
-            return; // Пропускаем сортировку, если структура данных неверна
+            return; // Skip sorting if data structure is invalid
         }
         
-        // Принудительная сортировка по полю 'name' без учета регистра
-        // Используем uasort для сохранения ключей массива (term_id)
+        // Force sort by 'name' field (case-insensitive)
+        // Use uasort to preserve array keys (term_id)
         uasort($categories, function($a, $b) {
-            // Нормализуем имена для корректного сравнения
+            // Normalize names for correct comparison
             $name_a = isset($a['name']) ? trim((string)$a['name']) : '';
             $name_b = isset($b['name']) ? trim((string)$b['name']) : '';
             
-            // Если имена пустые, помещаем их в конец
+            // If names are empty, place them at the end
             if (empty($name_a) && empty($name_b)) {
                 return 0;
             }
             if (empty($name_a)) {
-                return 1; // Пустое имя идет после
+                return 1; // Empty name goes after
             }
             if (empty($name_b)) {
-                return -1; // Пустое имя идет после
+                return -1; // Empty name goes after
             }
             
-            // Используем strcasecmp для case-insensitive сравнения
-            // Это гарантирует правильную алфавитную сортировку
+            // Use strcasecmp for case-insensitive comparison
+            // This ensures correct alphabetical sorting
             $result = strcasecmp($name_a, $name_b);
             
-            // Если имена одинаковы (case-insensitive), сортируем по slug для стабильности
+            // If names are the same (case-insensitive), sort by slug for stability
             if ($result === 0 && isset($a['slug']) && isset($b['slug'])) {
                 return strcasecmp($a['slug'], $b['slug']);
             }
@@ -368,23 +368,23 @@ class Multi_Level_Category_Menu {
         $parent = ($custom_root_id > 0) ? $custom_root_id : 0;
         $cache_key = ($parent === 0) ? 'mlcm_root_cats' : "mlcm_subcats_{$parent}";
         
-        // Используем get_transient, который автоматически работает с Redis Object Cache
+        // Use get_transient which automatically works with Redis Object Cache
         $cache = get_transient($cache_key);
         
         if (false !== $cache && is_array($cache)) {
-            // ВАЖНО: Всегда применяем принудительную сортировку, даже для данных из кэша
-            // Это гарантирует правильную сортировку для всех пользователей
-            // Создаем копию массива для сортировки, чтобы не нарушить ссылку на кэш
+            // IMPORTANT: Always apply force sorting, even for cached data
+            // This ensures correct sorting for all users
+            // Create array copy for sorting to avoid breaking cache reference
             $sorted_cache = $cache;
             $this->sort_categories($sorted_cache);
             return $sorted_cache;
         }
         
-        // Получаем категории через общую функцию
+        // Get categories via common function
         $result = $this->get_categories_data($parent);
         
-        // Используем set_transient, который автоматически работает с Redis Object Cache
-        // Если Redis недоступен, будет использован стандартный WordPress кэш
+        // Use set_transient which automatically works with Redis Object Cache
+        // If Redis is unavailable, standard WordPress cache will be used
         set_transient($cache_key, $result, WEEK_IN_SECONDS);
         
         return $result;
@@ -395,7 +395,7 @@ class Multi_Level_Category_Menu {
      * This endpoint doesn't require nonce verification as it's used to get a nonce
      */
     public function ajax_get_nonce() {
-        // Исключаем из кэша FlyingPress и других кэширующих плагинов
+        // Exclude from FlyingPress and other caching plugins
         $this->prevent_caching();
         
         $new_nonce = $this->setup_cookie_nonce();
@@ -404,7 +404,7 @@ class Multi_Level_Category_Menu {
     }
 
     public function ajax_handler() {
-        // Исключаем из кэша FlyingPress и других кэширующих плагинов
+        // Exclude from FlyingPress and other caching plugins
         $this->prevent_caching();
         
         $nonce = sanitize_text_field($_POST['security'] ?? '');
@@ -413,7 +413,7 @@ class Multi_Level_Category_Menu {
             $nonce = sanitize_text_field($_COOKIE['mlcm_nonce']);
         }
         
-        // Если nonce невалиден, возвращаем ошибку с кодом для повторной попытки
+        // If nonce is invalid, return error with retry code
         if (!wp_verify_nonce($nonce, 'mlcm_nonce')) {
             wp_send_json_error([
                 'message' => 'Invalid nonce',
@@ -425,7 +425,7 @@ class Multi_Level_Category_Menu {
 
         $parent_id = absint($_POST['parent_id'] ?? 0);
         
-        // Валидация parent_id
+        // Validate parent_id
         if ($parent_id < 0) {
             wp_send_json_error(['message' => 'Invalid parent ID']);
             wp_die();
@@ -433,24 +433,24 @@ class Multi_Level_Category_Menu {
         
         $cache_key = "mlcm_subcats_{$parent_id}";
         
-        // Используем get_transient, который автоматически работает с Redis Object Cache
+        // Use get_transient which automatically works with Redis Object Cache
         $response = get_transient($cache_key);
         
         if (false === $response || !is_array($response)) {
-            // Получаем категории через общую функцию
+            // Get categories via common function
             $response = $this->get_categories_data($parent_id);
             
-            // Сохраняем в кэш (уже отсортированные)
+            // Save to cache (already sorted)
             set_transient($cache_key, $response, WEEK_IN_SECONDS);
         } else {
-            // ВАЖНО: Всегда применяем принудительную сортировку, даже для данных из кэша
-            // Это гарантирует правильную сортировку для всех пользователей
+            // IMPORTANT: Always apply force sorting, even for cached data
+            // This ensures correct sorting for all users
             $this->sort_categories($response);
         }
         
-        // КРИТИЧНО: Преобразуем ассоциативный массив в индексированный массив
-        // для сохранения порядка при JSON сериализации
-        // JSON объекты не гарантируют порядок ключей, но массивы - да
+        // CRITICAL: Convert associative array to indexed array
+        // to preserve order during JSON serialization
+        // JSON objects don't guarantee key order, but arrays do
         $response_array = [];
         foreach ($response as $term_id => $data) {
             $response_array[] = array_merge(['id' => $term_id], $data);
@@ -505,7 +505,7 @@ class Multi_Level_Category_Menu {
 
         add_settings_section('mlcm_main', 'Main Settings', null, 'mlcm_options');
 
-        // Используем кэшированные опции для оптимизации
+        // Use cached options for optimization
         $options = $this->get_options();
 
         add_settings_field('mlcm_font_size', 'Font Size for Menu Items (rem)', function() use ($options) {
@@ -584,7 +584,7 @@ class Multi_Level_Category_Menu {
                 <span class="spinner" style="float:none; margin-left:10px"></span>';
         }, 'mlcm_options', 'mlcm_main');
         
-        // Сбрасываем кэш опций при сохранении настроек
+        // Clear options cache when settings are saved
         add_action('update_option', [$this, 'maybe_clear_options_cache'], 10, 2);
     }
     
@@ -598,7 +598,7 @@ class Multi_Level_Category_Menu {
     }
 
     public function enqueue_frontend_assets() {
-        // Загружаем скрипты только если на странице есть меню
+        // Load scripts only if menu exists on page
         if (!$this->has_menu_on_page()) {
             return;
         }
@@ -638,25 +638,25 @@ class Multi_Level_Category_Menu {
     private function has_menu_on_page() {
         global $post;
         
-        // Проверяем наличие шорткода в контенте поста/страницы
+        // Check for shortcode in post/page content
         if ($post && has_shortcode($post->post_content, 'mlcm_menu')) {
             return true;
         }
         
-        // Проверяем наличие виджета через проверку активных виджетов
+        // Check for widget via active widgets check
         if (is_active_widget(false, false, 'mlcm_widget', true)) {
             return true;
         }
         
-        // Проверяем наличие блока в контенте
+        // Check for block in content
         if ($post && has_blocks($post->post_content)) {
             if (has_block('mlcm/menu-block', $post->post_content)) {
                 return true;
             }
         }
         
-        // Если ничего не найдено, все равно загружаем (на случай динамического контента)
-        // Но это лучше, чем загружать на всех страницах без проверки
+        // If nothing found, still load (for dynamic content)
+        // But this is better than loading on all pages without check
         return true;
     }
 
@@ -677,11 +677,11 @@ class Multi_Level_Category_Menu {
     public function clear_all_caches() {
         global $wpdb;
         
-        // Удаляем через delete_transient (работает с Redis Object Cache)
+        // Delete via delete_transient (works with Redis Object Cache)
         delete_transient('mlcm_root_cats');
         
-        // Также удаляем напрямую из БД для совместимости
-        // Redis Object Cache автоматически синхронизирует это
+        // Also delete directly from DB for compatibility
+        // Redis Object Cache automatically syncs this
         $result = $wpdb->query(
             $wpdb->prepare(
                 "DELETE FROM $wpdb->options 
@@ -692,7 +692,7 @@ class Multi_Level_Category_Menu {
             )
         );
         
-        // Очищаем кэш Redis, если используется
+        // Clear Redis cache if used
         if (function_exists('wp_cache_flush_group')) {
             wp_cache_flush_group('transient');
         }
@@ -736,7 +736,7 @@ class Multi_Level_Category_Menu {
         $options = $this->get_options();
         $block_editor_file = plugin_dir_path(__FILE__) . 'assets/js/block-editor.js';
         
-        // Проверяем существование файла перед использованием filemtime
+        // Check file existence before using filemtime
         $version = file_exists($block_editor_file) ? filemtime($block_editor_file) : '3.5.1';
         
         wp_enqueue_script(

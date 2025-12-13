@@ -3,7 +3,7 @@
  * Priority: sessionStorage > window.mlcmNonce > fetch from server
  */
 function getMlcmNonce(callback) {
-    // Если nonce уже есть в кэше, возвращаем его
+    // If nonce is already in cache, return it
     const stored = sessionStorage.getItem('mlcm_nonce');
     if (stored) {
         window.mlcmNonce = stored;
@@ -13,7 +13,7 @@ function getMlcmNonce(callback) {
         return stored;
     }
     
-    // Если есть в window переменной
+    // If exists in window variable
     if (typeof window.mlcmNonce !== 'undefined' && window.mlcmNonce) {
         if (typeof callback === 'function') {
             callback(window.mlcmNonce);
@@ -21,7 +21,7 @@ function getMlcmNonce(callback) {
         return window.mlcmNonce;
     }
     
-    // Иначе получаем с сервера
+    // Otherwise fetch from server
     fetchFreshNonce(callback);
     return null;
 }
@@ -39,16 +39,16 @@ function getMlcmNonce(callback) {
             return;
         }
         
-        // Добавляем timestamp для предотвращения кэширования запроса
+        // Add timestamp to prevent request caching
         const timestamp = new Date().getTime();
         
         jQuery.ajax({
             url: mlcmVars.ajax_url,
             method: 'POST',
-            cache: false, // Явно отключаем кэширование
+            cache: false, // Explicitly disable caching
             data: {
                 action: 'mlcm_get_nonce',
-                _t: timestamp // Timestamp для предотвращения кэширования
+                _t: timestamp // Timestamp to prevent caching
             },
             success: (response) => {
                 if (response.success && response.data && response.data.nonce) {
@@ -78,28 +78,28 @@ jQuery(function($) {
     const $container = $('.mlcm-container');
     if (!$container.length) return; // Early exit
 
-    // Проверяем, закэширована ли страница
+    // Check if page is cached
     const isCached = $container.data('cached') === 1 || $container.data('cached') === '1';
     
-    // Для кэшированных страниц получаем nonce заранее
-    // Для некэшированных - получим при первом использовании
+    // For cached pages, get nonce in advance
+    // For non-cached pages, get it on first use
     if (isCached) {
-        getMlcmNonce(); // Предзагрузка nonce для кэшированных страниц
+        getMlcmNonce(); // Preload nonce for cached pages
     }
 
-    // Remove duplicate buttons (оптимизировано)
+    // Remove duplicate buttons (optimized)
     const $buttons = $container.find('.mlcm-go-button');
     if ($buttons.length > 1) {
         $buttons.not(':first').remove();
     }
 
-    // Applying dynamic styles (только если нужны)
+    // Applying dynamic styles (only if needed)
     const gap = parseInt($container.css('gap'));
     const fontSize = $container.css('font-size');
     if (gap) $container[0].style.setProperty('--mlcm-gap', `${gap}px`);
     if (fontSize) $container[0].style.setProperty('--mlcm-font-size', fontSize);
 
-    // Debounce для обработки изменений select
+    // Debounce for select change handling
     let changeTimeout;
     $container.on('change', '.mlcm-select', function() {
         const $select = $(this);
@@ -114,7 +114,7 @@ jQuery(function($) {
             return;
         }
         
-        // Небольшая задержка для предотвращения множественных запросов
+        // Small delay to prevent multiple requests
         changeTimeout = setTimeout(() => {
             loadSubcategories($select, level, parentId);
         }, 150);
@@ -133,7 +133,7 @@ jQuery(function($) {
         });
     }
 
-    // Показать индикатор загрузки
+    // Show loading indicator
     function showLoading($select) {
         const $nextSelect = $select.next('.mlcm-level').find('.mlcm-select');
         if ($nextSelect.length) {
@@ -142,12 +142,12 @@ jQuery(function($) {
         }
     }
 
-    // Скрыть индикатор загрузки
+    // Hide loading indicator
     function hideLoading() {
-        // Уже обрабатывается в updateNextLevel
+        // Already handled in updateNextLevel
     }
 
-    // Loading subcategories (оптимизировано)
+    // Loading subcategories (optimized)
     function loadSubcategories($select, level, parentId, retryCount = 0) {
         const maxLevels = $container.data('levels');
         if (level >= maxLevels) {
@@ -155,10 +155,10 @@ jQuery(function($) {
             return;
         }
 
-        // Показываем индикатор загрузки
+        // Show loading indicator
         showLoading($select);
 
-        // Получаем nonce асинхронно
+        // Get nonce asynchronously
         getMlcmNonce(function(currentNonce) {
             if (!currentNonce) {
                 console.error('MLCM: Could not get nonce');
@@ -169,25 +169,25 @@ jQuery(function($) {
             $.ajax({
                 url: mlcmVars.ajax_url,
                 method: 'POST',
-                cache: false, // Явно отключаем кэширование AJAX запросов
+                cache: false, // Explicitly disable caching AJAX запросов
                 data: {
                     action: 'mlcm_get_subcategories',
                     parent_id: parentId,
                     security: currentNonce,
-                    _t: new Date().getTime() // Timestamp для предотвращения кэширования
+                    _t: new Date().getTime() // Timestamp to prevent caching
                 },
                 beforeSend: () => {
                     $select.nextAll('.mlcm-select').val('-1').prop('disabled', true);
                 },
                 success: (response) => {
-                    // Проверяем ошибку nonce и повторяем запрос
+                    // Check nonce error and retry request
                     if (!response.success && response.data && response.data.code === 'invalid_nonce' && response.data.retry) {
                         if (retryCount < 2) {
-                            // Очищаем кэш nonce и получаем новый
+                            // Clear nonce cache and get new one
                             sessionStorage.removeItem('mlcm_nonce');
                             delete window.mlcmNonce;
                             
-                            // Повторяем запрос с новым nonce
+                            // Retry request with new nonce
                             setTimeout(function() {
                                 loadSubcategories($select, level, parentId, retryCount + 1);
                             }, 100);
@@ -199,11 +199,11 @@ jQuery(function($) {
                         }
                     }
                     
-                    // Обрабатываем успешный ответ
+                    // Handle successful response
                     if (response.success && response.data && Object.keys(response.data).length > 0) {
                         updateNextLevel($select, level, response.data);
                     } else {
-                        // Если нет подкатегорий, делаем редирект
+                        // If no subcategories, redirect
                         hideLoading();
                         redirectToCategory();
                     }
@@ -216,8 +216,8 @@ jQuery(function($) {
         });
     }
 
-    // Next level update (оптимизировано)
-    // Данные приходят как массив объектов, уже отсортированные на сервере
+    // Next level update (optimized)
+    // Data comes as array of objects, already sorted on server
     function updateNextLevel($select, currentLevel, categories) {
         const nextLevel = currentLevel + 1;
         const $nextSelect = $(`.mlcm-select[data-level="${nextLevel}"]`);
@@ -226,12 +226,12 @@ jQuery(function($) {
         
         const label = mlcmVars.labels[nextLevel - 1];
         
-        // Данные теперь приходят как массив объектов [{id, name, slug, url}, ...]
-        // Это гарантирует сохранение порядка из сервера
+        // Data now comes as array of objects [{id, name, slug, url}, ...]
+        // This ensures order preservation from server
         let options = '';
         
         if (Array.isArray(categories)) {
-            // Если это массив - используем напрямую (новый формат)
+            // If it's an array - use directly (new format)
             options = categories.map(item => {
                 const id = item.id || item.term_id || '';
                 const name = item.name || '';
@@ -240,8 +240,8 @@ jQuery(function($) {
                 return `<option value="${id}" data-slug="${slug}" data-url="${url}">${name}</option>`;
             }).join('');
         } else if (typeof categories === 'object' && categories !== null) {
-            // Обратная совместимость: если пришел объект (старый формат)
-            // Сортируем по имени перед отображением
+            // Backward compatibility: if object received (old format)
+            // Sort by name before displaying
             const entries = Object.entries(categories);
             entries.sort((a, b) => {
                 const nameA = (a[1].name || '').toUpperCase();
@@ -266,7 +266,7 @@ jQuery(function($) {
         
         if ($lastSelect.length) {
             const url = $lastSelect.find('option:selected').data('url');
-            // Валидация URL перед редиректом
+            // Validate URL before redirect
             if (url && url.startsWith('http')) {
                 window.location.href = url;
             }
