@@ -282,7 +282,7 @@ class Multi_Level_Category_Menu {
             return $cache;
         }
         
-        // Используем orderby для сортировки на уровне БД вместо usort
+        // Получаем категории (orderby используется для предварительной сортировки)
         $categories = get_categories([
             'parent' => $parent,
             'exclude' => $excluded,
@@ -300,6 +300,12 @@ class Multi_Level_Category_Menu {
                 'url' => get_category_link($category->term_id)
             ];
         }
+        
+        // Сортируем по именам после преобразования в верхний регистр
+        // Это гарантирует правильную сортировку независимо от работы get_categories()
+        uasort($result, function($a, $b) {
+            return strcasecmp($a['name'], $b['name']);
+        });
         
         // Используем set_transient, который автоматически работает с Redis Object Cache
         // Если Redis недоступен, будет использован стандартный WordPress кэш
@@ -381,6 +387,13 @@ class Multi_Level_Category_Menu {
                     'url' => get_category_link($category->term_id)
                 ];
             }
+            
+            // Сортируем по именам после преобразования в верхний регистр
+            // Это гарантирует правильную сортировку независимо от работы get_categories()
+            uasort($response, function($a, $b) {
+                return strcasecmp($a['name'], $b['name']);
+            });
+            
             // Используем set_transient, который автоматически работает с Redis Object Cache
             set_transient($cache_key, $response, WEEK_IN_SECONDS);
         }
