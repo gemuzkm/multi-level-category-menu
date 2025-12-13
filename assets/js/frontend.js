@@ -217,7 +217,7 @@ jQuery(function($) {
     }
 
     // Next level update (оптимизировано)
-    // Убрана двойная сортировка - данные уже отсортированы на сервере
+    // Данные приходят как массив объектов, уже отсортированные на сервере
     function updateNextLevel($select, currentLevel, categories) {
         const nextLevel = currentLevel + 1;
         const $nextSelect = $(`.mlcm-select[data-level="${nextLevel}"]`);
@@ -226,10 +226,33 @@ jQuery(function($) {
         
         const label = mlcmVars.labels[nextLevel - 1];
         
-        // Данные уже отсортированы на сервере, просто создаем опции
-        const options = Object.entries(categories).map(([id, data]) => 
-            `<option value="${id}" data-slug="${data.slug}" data-url="${data.url}">${data.name}</option>`
-        ).join('');
+        // Данные теперь приходят как массив объектов [{id, name, slug, url}, ...]
+        // Это гарантирует сохранение порядка из сервера
+        let options = '';
+        
+        if (Array.isArray(categories)) {
+            // Если это массив - используем напрямую (новый формат)
+            options = categories.map(item => {
+                const id = item.id || item.term_id || '';
+                const name = item.name || '';
+                const slug = item.slug || '';
+                const url = item.url || '';
+                return `<option value="${id}" data-slug="${slug}" data-url="${url}">${name}</option>`;
+            }).join('');
+        } else if (typeof categories === 'object' && categories !== null) {
+            // Обратная совместимость: если пришел объект (старый формат)
+            // Сортируем по имени перед отображением
+            const entries = Object.entries(categories);
+            entries.sort((a, b) => {
+                const nameA = (a[1].name || '').toUpperCase();
+                const nameB = (b[1].name || '').toUpperCase();
+                return nameA.localeCompare(nameB);
+            });
+            
+            options = entries.map(([id, data]) => 
+                `<option value="${id}" data-slug="${data.slug || ''}" data-url="${data.url || ''}">${data.name || ''}</option>`
+            ).join('');
+        }
         
         $nextSelect.prop('disabled', false)
             .html(`<option value="-1">${label}</option>${options}`);

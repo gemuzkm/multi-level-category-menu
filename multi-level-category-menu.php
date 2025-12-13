@@ -260,9 +260,12 @@ class Multi_Level_Category_Menu {
         <?php
     }
 
-    private function get_root_categories() {
+    /**
+     * Get categories data for a given parent ID
+     * Optimized function used by both get_root_categories and ajax_handler
+     */
+    private function get_categories_data($parent_id) {
         $options = $this->get_options();
-        $custom_root_id = $options['custom_root_id'];
         $excluded_str = $options['excluded_cats'];
         
         // Безопасное преобразование строки в массив ID
@@ -273,18 +276,9 @@ class Multi_Level_Category_Menu {
             );
         }
         
-        $parent = ($custom_root_id > 0) ? $custom_root_id : 0;
-        $cache_key = ($parent === 0) ? 'mlcm_root_cats' : "mlcm_subcats_{$parent}";
-        
-        // Используем get_transient, который автоматически работает с Redis Object Cache
-        $cache = get_transient($cache_key);
-        if (false !== $cache) {
-            return $cache;
-        }
-        
         // Получаем категории (orderby используется для предварительной сортировки)
         $categories = get_categories([
-            'parent' => $parent,
+            'parent' => $parent_id,
             'exclude' => $excluded,
             'hide_empty' => false,
             'orderby' => 'name',
@@ -294,18 +288,100 @@ class Multi_Level_Category_Menu {
 
         $result = [];
         foreach ($categories as $category) {
+            if (!isset($category->term_id) || !isset($category->name)) {
+                continue; // Пропускаем некорректные данные
+            }
+            
             $result[$category->term_id] = [
                 'name' => strtoupper(htmlspecialchars_decode($category->name)),
-                'slug' => $category->slug,
+                'slug' => isset($category->slug) ? $category->slug : '',
                 'url' => get_category_link($category->term_id)
             ];
         }
         
-        // Сортируем по именам после преобразования в верхний регистр
-        // Это гарантирует правильную сортировку независимо от работы get_categories()
-        uasort($result, function($a, $b) {
-            return strcasecmp($a['name'], $b['name']);
+        // Принудительная сортировка по именам после преобразования в верхний регистр
+        // Это гарантирует правильный порядок независимо от порядка в БД
+        $this->sort_categories($result);
+        
+        return $result;
+    }
+    
+    /**
+     * Sort categories array by name (case-insensitive)
+     * This ensures consistent sorting regardless of cache state
+     * Uses uasort to preserve array keys (term_id)
+     */
+    private function sort_categories(&$categories) {
+        if (!is_array($categories) || empty($categories)) {
+            return;
+        }
+        
+        // Принудительная сортировка через uasort
+        // Проверяем структуру данных перед сортировкой
+        $is_valid = true;
+        foreach ($categories as $key => $value) {
+            if (!is_array($value) || !isset($value['name'])) {
+                $is_valid = false;
+                break;
+            }
+        }
+        
+        if (!$is_valid) {
+            return; // Пропускаем сортировку, если структура данных неверна
+        }
+        
+        // Принудительная сортировка по полю 'name' без учета регистра
+        // Используем uasort для сохранения ключей массива (term_id)
+        uasort($categories, function($a, $b) {
+            // Нормализуем имена для корректного сравнения
+            $name_a = isset($a['name']) ? trim((string)$a['name']) : '';
+            $name_b = isset($b['name']) ? trim((string)$b['name']) : '';
+            
+            // Если имена пустые, помещаем их в конец
+            if (empty($name_a) && empty($name_b)) {
+                return 0;
+            }
+            if (empty($name_a)) {
+                return 1; // Пустое имя идет после
+            }
+            if (empty($name_b)) {
+                return -1; // Пустое имя идет после
+            }
+            
+            // Используем strcasecmp для case-insensitive сравнения
+            // Это гарантирует правильную алфавитную сортировку
+            $result = strcasecmp($name_a, $name_b);
+            
+            // Если имена одинаковы (case-insensitive), сортируем по slug для стабильности
+            if ($result === 0 && isset($a['slug']) && isset($b['slug'])) {
+                return strcasecmp($a['slug'], $b['slug']);
+            }
+            
+            return $result;
         });
+    }
+
+    private function get_root_categories() {
+        $options = $this->get_options();
+        $custom_root_id = $options['custom_root_id'];
+        
+        $parent = ($custom_root_id > 0) ? $custom_root_id : 0;
+        $cache_key = ($parent === 0) ? 'mlcm_root_cats' : "mlcm_subcats_{$parent}";
+        
+        // Используем get_transient, который автоматически работает с Redis Object Cache
+        $cache = get_transient($cache_key);
+        
+        if (false !== $cache && is_array($cache)) {
+            // ВАЖНО: Всегда применяем принудительную сортировку, даже для данных из кэша
+            // Это гарантирует правильную сортировку для всех пользователей
+            // Создаем копию массива для сортировки, чтобы не нарушить ссылку на кэш
+            $sorted_cache = $cache;
+            $this->sort_categories($sorted_cache);
+            return $sorted_cache;
+        }
+        
+        // Получаем категории через общую функцию
+        $result = $this->get_categories_data($parent);
         
         // Используем set_transient, который автоматически работает с Redis Object Cache
         // Если Redis недоступен, будет использован стандартный WordPress кэш
@@ -358,47 +434,29 @@ class Multi_Level_Category_Menu {
         $cache_key = "mlcm_subcats_{$parent_id}";
         
         // Используем get_transient, который автоматически работает с Redis Object Cache
-        if (false === ($response = get_transient($cache_key))) {
-            $options = $this->get_options();
-            $excluded_str = $options['excluded_cats'];
+        $response = get_transient($cache_key);
+        
+        if (false === $response || !is_array($response)) {
+            // Получаем категории через общую функцию
+            $response = $this->get_categories_data($parent_id);
             
-            // Применяем исключенные категории
-            $excluded = [];
-            if (!empty($excluded_str)) {
-                $excluded = array_filter(
-                    array_map('absint', array_map('trim', explode(',', $excluded_str)))
-                );
-            }
-            
-            $categories = get_categories([
-                'parent' => $parent_id,
-                'exclude' => $excluded,
-                'hide_empty' => false,
-                'orderby' => 'name',
-                'order' => 'ASC',
-                'fields' => 'all'
-            ]);
-            
-            $response = [];
-            foreach ($categories as $category) {
-                $response[$category->term_id] = [
-                    'name' => strtoupper(htmlspecialchars_decode($category->name)),
-                    'slug' => $category->slug,
-                    'url' => get_category_link($category->term_id)
-                ];
-            }
-            
-            // Сортируем по именам после преобразования в верхний регистр
-            // Это гарантирует правильную сортировку независимо от работы get_categories()
-            uasort($response, function($a, $b) {
-                return strcasecmp($a['name'], $b['name']);
-            });
-            
-            // Используем set_transient, который автоматически работает с Redis Object Cache
+            // Сохраняем в кэш (уже отсортированные)
             set_transient($cache_key, $response, WEEK_IN_SECONDS);
+        } else {
+            // ВАЖНО: Всегда применяем принудительную сортировку, даже для данных из кэша
+            // Это гарантирует правильную сортировку для всех пользователей
+            $this->sort_categories($response);
         }
         
-        wp_send_json_success($response);
+        // КРИТИЧНО: Преобразуем ассоциативный массив в индексированный массив
+        // для сохранения порядка при JSON сериализации
+        // JSON объекты не гарантируют порядок ключей, но массивы - да
+        $response_array = [];
+        foreach ($response as $term_id => $data) {
+            $response_array[] = array_merge(['id' => $term_id], $data);
+        }
+        
+        wp_send_json_success($response_array);
     }
 
     public function register_settings() {
