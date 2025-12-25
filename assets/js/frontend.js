@@ -225,6 +225,22 @@ jQuery(function($) {
         if (!$nextSelect.length) return;
         
         const label = mlcmVars.labels[nextLevel - 1];
+        const selectId = $nextSelect.attr('id');
+        const labelId = `mlcm-label-level-${nextLevel}`;
+        
+        // Ensure label exists for accessibility
+        let $label = $(`#${labelId}`);
+        if (!$label.length) {
+            // Create label if it doesn't exist
+            $label = $(`<label for="${selectId}" id="${labelId}" class="mlcm-screen-reader-text">${label}</label>`);
+            $nextSelect.before($label);
+        } else {
+            // Update existing label text
+            $label.text(label);
+        }
+        
+        // Update aria-labelledby attribute
+        $nextSelect.attr('aria-labelledby', labelId);
         
         // Data now comes as array of objects [{id, name, slug, url}, ...]
         // This ensures order preservation from server

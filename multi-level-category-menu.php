@@ -245,8 +245,13 @@ class Multi_Level_Category_Menu {
         $label = $options['labels'][$level - 1];
         $categories = ($level === 1) ? $this->get_root_categories() : [];
         $select_id = "mlcm-select-level-{$level}";
+        $label_id = "mlcm-label-level-{$level}";
         ?>
+        <label for="<?= esc_attr($select_id) ?>" id="<?= esc_attr($label_id) ?>" class="mlcm-screen-reader-text">
+            <?= esc_html($label) ?>
+        </label>
         <select id="<?= esc_attr($select_id) ?>" class="mlcm-select" data-level="<?= $level ?>" 
+                aria-labelledby="<?= esc_attr($label_id) ?>"
                 <?= $level > 1 ? 'disabled' : '' ?>>
             <option value="-1"><?= esc_html($label) ?></option>
             <?php foreach ($categories as $id => $data): ?>
