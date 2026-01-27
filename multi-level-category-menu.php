@@ -2,7 +2,7 @@
 /*
 Plugin Name: Multi-Level Category Menu
 Description: Creates customizable category menus with 5-level depth
-Version: 3.5.1
+Version: 3.6.0
 Author: Name
 Text Domain: mlcm
 */
@@ -13,6 +13,8 @@ class Multi_Level_Category_Menu {
     private static $instance;
     private $options_cache = null;
     private $nonce_cache = null;
+    private $cache_dir = null;
+    private $cache_url = null;
 
     public static function get_instance() {
         if (!isset(self::$instance)) {
@@ -22,22 +24,47 @@ class Multi_Level_Category_Menu {
     }
 
     public function __construct() {
+        $this->cache_dir = wp_upload_dir()['basedir'] . '/mlcm-menu-cache';
+        $this->cache_url = wp_upload_dir()['baseurl'] . '/mlcm-menu-cache';
+        
         add_shortcode('mlcm_menu', [$this, 'shortcode_handler']);
         add_action('widgets_init', [$this, 'register_widget']);
         add_action('init', [$this, 'register_gutenberg_block']);
-        // Remove setup_cookie_nonce from init - will be called only when needed
         add_action('wp_enqueue_scripts', [$this, 'enqueue_frontend_assets']);
         add_action('enqueue_block_editor_assets', [$this, 'enqueue_block_editor_assets']);
         add_action('admin_init', [$this, 'register_settings']);
         add_action('admin_menu', [$this, 'add_admin_menu']);
+        
+        // AJAX handlers - only used as fallback if JSON not available
         add_action('wp_ajax_mlcm_get_subcategories', [$this, 'ajax_handler']);
         add_action('wp_ajax_nopriv_mlcm_get_subcategories', [$this, 'ajax_handler']);
-        add_action('wp_ajax_mlcm_get_nonce', [$this, 'ajax_get_nonce']);
-        add_action('wp_ajax_nopriv_mlcm_get_nonce', [$this, 'ajax_get_nonce']);
-        add_action('edited_category', [$this, 'clear_related_cache']);
-        add_action('create_category', [$this, 'clear_related_cache']);
-        add_action('delete_category', [$this, 'clear_related_cache']);
+        add_action('wp_ajax_mlcm_generate_menu', [$this, 'ajax_generate_menu']);
+        
+        // Cache invalidation on category changes
+        add_action('edited_category', [$this, 'invalidate_cache']);
+        add_action('create_category', [$this, 'invalidate_cache']);
+        add_action('delete_category', [$this, 'invalidate_cache']);
+        
         add_action('admin_enqueue_scripts', [$this, 'enqueue_admin_assets']);
+    }
+
+    /**
+     * Initialize cache directory
+     */
+    private function init_cache_dir() {
+        if (!is_dir($this->cache_dir)) {
+            wp_mkdir_p($this->cache_dir);
+            // Create .htaccess to allow direct access to JSON files
+            $htaccess = $this->cache_dir . '/.htaccess';
+            if (!file_exists($htaccess)) {
+                $content = "AddType application/json .json\n";
+                $content .= "<FilesMatch \"\.json$\">\n";
+                $content .= "  Header set Cache-Control \"public, max-age=604800\"\n";
+                $content .= "  Header set Content-Encoding gzip\n";
+                $content .= "</FilesMatch>\n";
+                file_put_contents($htaccess, $content);
+            }
+        }
     }
 
     /**
@@ -60,7 +87,8 @@ class Multi_Level_Category_Menu {
                 'excluded_cats' => sanitize_text_field(get_option('mlcm_excluded_cats', '')),
                 'labels' => array_map(function($i) {
                     return sanitize_text_field(get_option("mlcm_level_{$i}_label", "Level {$i}"));
-                }, range(1, 5))
+                }, range(1, 5)),
+                'use_static_files' => get_option('mlcm_use_static_files', '1') === '1'
             ];
         }
         return $this->options_cache;
@@ -72,7 +100,6 @@ class Multi_Level_Category_Menu {
     private function generate_inline_css($options) {
         $css = [];
         
-        // Optimized CSS generation with validation
         if (!empty($options['menu_width']) && $options['menu_width'] > 0) {
             $css[] = ".mlcm-select{width:{$options['menu_width']}px}";
         }
@@ -85,7 +112,7 @@ class Multi_Level_Category_Menu {
         if (!empty($options['button_bg_color']) && preg_match('/^#[a-fA-F0-9]{6}$/', $options['button_bg_color'])) {
             $css[] = ".mlcm-go-button{background:{$options['button_bg_color']}}";
         }
-        if (!empty($options['button_font_size']) && is_numeric($options['button_font_size'])) {
+        if (!empty($options['button_font_size']) && is_numeric($options['button_button_font_size'])) {
             $css[] = ".mlcm-go-button{font-size:{$options['button_font_size']}rem}";
         }
         if (!empty($options['button_hover_bg_color']) && preg_match('/^#[a-fA-F0-9]{6}$/', $options['button_hover_bg_color'])) {
@@ -119,83 +146,6 @@ class Multi_Level_Category_Menu {
         ]);
     }
 
-    /**
-     * Prevent caching for AJAX requests
-     * Compatible with FlyingPress, WP Rocket, and other caching plugins
-     */
-    private function prevent_caching() {
-        // Set headers to prevent caching
-        if (!headers_sent()) {
-            header('Cache-Control: no-cache, no-store, must-revalidate, max-age=0');
-            header('Pragma: no-cache');
-            header('Expires: 0');
-            
-            // For FlyingPress
-            if (function_exists('flying_press_bypass')) {
-                flying_press_bypass();
-            }
-            
-            // For WP Rocket
-            if (defined('WP_ROCKET_VERSION')) {
-                define('DONOTCACHEPAGE', true);
-            }
-            
-            // For W3 Total Cache
-            if (defined('W3TC')) {
-                define('DONOTCACHEPAGE', true);
-                define('DONOTCACHEOBJECT', true);
-                define('DONOTCACHEDB', true);
-            }
-            
-            // For WP Super Cache
-            if (defined('WPCACHEHOME')) {
-                define('DONOTCACHEPAGE', true);
-            }
-        }
-    }
-
-    /**
-     * Setup secure cookie-based nonce with memory cache
-     * Compatible with cached pages - nonce is generated dynamically via AJAX
-     */
-    public function setup_cookie_nonce() {
-        if (null !== $this->nonce_cache) {
-            return $this->nonce_cache;
-        }
-        
-        $cookie_name = 'mlcm_nonce';
-        
-        // Check cookie (works even on cached pages)
-        if (isset($_COOKIE[$cookie_name])) {
-            $cookie_nonce = sanitize_text_field($_COOKIE[$cookie_name]);
-            
-            // Verify nonce validity
-            // wp_verify_nonce checks both format and expiration
-            if (wp_verify_nonce($cookie_nonce, 'mlcm_nonce')) {
-                $this->nonce_cache = $cookie_nonce;
-                return $cookie_nonce;
-            }
-        }
-        
-        // Create new nonce
-        $new_nonce = wp_create_nonce('mlcm_nonce');
-        
-        // Set cookie with extended lifetime for cached pages
-        setcookie(
-            $cookie_name,
-            $new_nonce,
-            time() + (2 * DAY_IN_SECONDS), // 48 hours instead of 24
-            COOKIEPATH,
-            COOKIE_DOMAIN,
-            is_ssl(),
-            true
-        );
-        
-        $this->nonce_cache = $new_nonce;
-        return $new_nonce;
-    }
-    
-
     public function render_gutenberg_block($attributes) {
         $atts = shortcode_atts([
             'layout' => 'vertical',
@@ -216,64 +166,13 @@ class Multi_Level_Category_Menu {
         return $this->generate_menu_html($atts);
     }
 
-    private function generate_menu_html($atts) {
-        $options = $this->get_options();
-        
-        // Do NOT embed nonce in HTML for caching compatibility
-        // Nonce will be fetched dynamically via AJAX on first use
-        
-        ob_start(); ?>
-        <div class="mlcm-container <?php echo esc_attr($atts['layout']); ?>" 
-             data-levels="<?php echo absint($atts['levels']); ?>"
-             data-cached="<?php echo (defined('WP_CACHE') && WP_CACHE) ? '1' : '0'; ?>">
-            <?php for($i = 1; $i <= $atts['levels']; $i++): ?>
-                <div class="mlcm-level" data-level="<?php echo $i; ?>">
-                    <?php $this->render_select($i); ?>
-                </div>
-            <?php endfor; ?>
-            <?php if ($options['show_button']): ?>
-                <button type="button" class="mlcm-go-button <?php echo esc_attr($atts['layout']); ?>">
-                    <?php esc_html_e('Go', 'mlcm'); ?>
-                </button>
-            <?php endif; ?>
-        </div>
-        <?php return ob_get_clean();
-    }
-
-    private function render_select($level) {
-        $options = $this->get_options();
-        $label = $options['labels'][$level - 1];
-        $categories = ($level === 1) ? $this->get_root_categories() : [];
-        $select_id = "mlcm-select-level-{$level}";
-        $label_id = "mlcm-label-level-{$level}";
-        ?>
-        <label for="<?= esc_attr($select_id) ?>" id="<?= esc_attr($label_id) ?>" class="mlcm-screen-reader-text">
-            <?= esc_html($label) ?>
-        </label>
-        <select id="<?= esc_attr($select_id) ?>" class="mlcm-select" data-level="<?= $level ?>" 
-                aria-labelledby="<?= esc_attr($label_id) ?>"
-                <?= $level > 1 ? 'disabled' : '' ?>>
-            <option value="-1"><?= esc_html($label) ?></option>
-            <?php foreach ($categories as $id => $data): ?>
-                <option value="<?= absint($id) ?>" 
-                        data-slug="<?= esc_attr($data['slug'] ?? '') ?>" 
-                        data-url="<?= esc_url($data['url'] ?? '') ?>">
-                    <?= esc_html($data['name'] ?? '') ?>
-                </option>
-            <?php endforeach; ?>
-        </select>
-        <?php
-    }
-
     /**
-     * Get categories data for a given parent ID
-     * Optimized function used by both get_root_categories and ajax_handler
+     * Get categories data with proper sorting and filtering
      */
-    private function get_categories_data($parent_id) {
+    private function get_categories_data($parent_id = 0) {
         $options = $this->get_options();
         $excluded_str = $options['excluded_cats'];
         
-        // Safe conversion of string to array of IDs
         $excluded = [];
         if (!empty($excluded_str)) {
             $excluded = array_filter(
@@ -281,7 +180,6 @@ class Multi_Level_Category_Menu {
             );
         }
         
-        // Get categories (orderby is used for preliminary sorting)
         $categories = get_categories([
             'parent' => $parent_id,
             'exclude' => $excluded,
@@ -294,174 +192,279 @@ class Multi_Level_Category_Menu {
         $result = [];
         foreach ($categories as $category) {
             if (!isset($category->term_id) || !isset($category->name)) {
-                continue; // Skip invalid data
+                continue;
             }
             
+            // Check if category has children
+            $children_count = count(get_term_children($category->term_id, 'category'));
+            
             $result[$category->term_id] = [
+                'id' => $category->term_id,
                 'name' => strtoupper(htmlspecialchars_decode($category->name)),
                 'slug' => isset($category->slug) ? $category->slug : '',
-                'url' => get_category_link($category->term_id)
+                'url' => get_category_link($category->term_id),
+                'hasChildren' => $children_count > 0
             ];
         }
         
-        // Force sort by names after converting to uppercase
-        // This ensures correct order regardless of database order
         $this->sort_categories($result);
         
         return $result;
     }
-    
+
     /**
-     * Sort categories array by name (case-insensitive)
-     * This ensures consistent sorting regardless of cache state
-     * Uses uasort to preserve array keys (term_id)
+     * Sort categories by name
      */
     private function sort_categories(&$categories) {
         if (!is_array($categories) || empty($categories)) {
             return;
         }
         
-        // Force sort using uasort
-        // Check data structure before sorting
-        $is_valid = true;
-        foreach ($categories as $key => $value) {
-            if (!is_array($value) || !isset($value['name'])) {
-                $is_valid = false;
-                break;
-            }
-        }
-        
-        if (!$is_valid) {
-            return; // Skip sorting if data structure is invalid
-        }
-        
-        // Force sort by 'name' field (case-insensitive)
-        // Use uasort to preserve array keys (term_id)
         uasort($categories, function($a, $b) {
-            // Normalize names for correct comparison
             $name_a = isset($a['name']) ? trim((string)$a['name']) : '';
             $name_b = isset($b['name']) ? trim((string)$b['name']) : '';
             
-            // If names are empty, place them at the end
             if (empty($name_a) && empty($name_b)) {
                 return 0;
             }
             if (empty($name_a)) {
-                return 1; // Empty name goes after
+                return 1;
             }
             if (empty($name_b)) {
-                return -1; // Empty name goes after
+                return -1;
             }
             
-            // Use strcasecmp for case-insensitive comparison
-            // This ensures correct alphabetical sorting
-            $result = strcasecmp($name_a, $name_b);
-            
-            // If names are the same (case-insensitive), sort by slug for stability
-            if ($result === 0 && isset($a['slug']) && isset($b['slug'])) {
-                return strcasecmp($a['slug'], $b['slug']);
-            }
-            
-            return $result;
+            return strcasecmp($name_a, $name_b);
         });
     }
 
-    private function get_root_categories() {
+    /**
+     * Generate static JSON files for all category levels
+     */
+    public function generate_static_menus() {
+        $this->init_cache_dir();
         $options = $this->get_options();
-        $custom_root_id = $options['custom_root_id'];
+        $custom_root_id = $options['custom_root_id'] > 0 ? $options['custom_root_id'] : 0;
         
-        $parent = ($custom_root_id > 0) ? $custom_root_id : 0;
-        $cache_key = ($parent === 0) ? 'mlcm_root_cats' : "mlcm_subcats_{$parent}";
-        
-        // Use get_transient which automatically works with Redis Object Cache
-        $cache = get_transient($cache_key);
-        
-        if (false !== $cache && is_array($cache)) {
-            // IMPORTANT: Always apply force sorting, even for cached data
-            // This ensures correct sorting for all users
-            // Create array copy for sorting to avoid breaking cache reference
-            $sorted_cache = $cache;
-            $this->sort_categories($sorted_cache);
-            return $sorted_cache;
+        try {
+            // Generate level 1 (root categories)
+            $level_1_data = $this->get_categories_data($custom_root_id);
+            
+            // Convert to indexed array for consistent ordering
+            $level_1_array = array_values($level_1_data);
+            
+            $this->write_json_file('level-1.json', $level_1_array);
+            
+            // Generate data for levels 2-5
+            // Collect all parent IDs to generate their subcategories
+            $all_parents = [];
+            $current_level_parents = array_keys($level_1_data);
+            
+            for ($level = 2; $level <= 5; $level++) {
+                $level_data = [];
+                $next_level_parents = [];
+                
+                foreach ($current_level_parents as $parent_id) {
+                    $subcats = $this->get_categories_data($parent_id);
+                    if (!empty($subcats)) {
+                        // Store as indexed array
+                        $level_data[$parent_id] = array_values($subcats);
+                        $next_level_parents = array_merge($next_level_parents, array_keys($subcats));
+                    }
+                }
+                
+                if (!empty($level_data)) {
+                    $this->write_json_file("level-{$level}.json", $level_data);
+                    $current_level_parents = array_unique($next_level_parents);
+                } else {
+                    // No more categories at this level
+                    break;
+                }
+            }
+            
+            // Write metadata
+            $meta = [
+                'generated_at' => current_time('mysql'),
+                'generated_timestamp' => time(),
+                'custom_root_id' => $custom_root_id,
+                'levels_count' => $level
+            ];
+            $this->write_json_file('meta.json', $meta);
+            
+            return [
+                'success' => true,
+                'message' => 'Menu generated successfully',
+                'levels' => $level - 1
+            ];
+        } catch (Exception $e) {
+            return [
+                'success' => false,
+                'message' => $e->getMessage()
+            ];
         }
-        
-        // Get categories via common function
-        $result = $this->get_categories_data($parent);
-        
-        // Use set_transient which automatically works with Redis Object Cache
-        // If Redis is unavailable, standard WordPress cache will be used
-        set_transient($cache_key, $result, WEEK_IN_SECONDS);
-        
-        return $result;
     }
 
     /**
-     * AJAX handler for getting fresh nonce
-     * This endpoint doesn't require nonce verification as it's used to get a nonce
+     * Write JSON file with gzip compression
      */
-    public function ajax_get_nonce() {
-        // Exclude from FlyingPress and other caching plugins
-        $this->prevent_caching();
+    private function write_json_file($filename, $data) {
+        $filepath = $this->cache_dir . '/' . $filename;
+        $json = json_encode($data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
         
-        $new_nonce = $this->setup_cookie_nonce();
-        wp_send_json_success(['nonce' => $new_nonce]);
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            throw new Exception('JSON encoding error: ' . json_last_error_msg());
+        }
+        
+        // Write normal JSON file
+        if (file_put_contents($filepath, $json) === false) {
+            throw new Exception("Failed to write file: {$filepath}");
+        }
+        
+        // Try to write gzipped version if zlib available
+        if (extension_loaded('zlib')) {
+            $gz_filepath = $filepath . '.gz';
+            $gz_data = gzencode($json, 9);
+            if ($gz_data !== false) {
+                file_put_contents($gz_filepath, $gz_data);
+            }
+        }
+    }
+
+    /**
+     * Get level 1 data for inline embedding
+     */
+    private function get_level_1_data() {
+        $cache_file = $this->cache_dir . '/level-1.json';
+        
+        // Try to read from static file first
+        if (file_exists($cache_file)) {
+            $content = file_get_contents($cache_file);
+            if ($content !== false) {
+                return json_decode($content, true);
+            }
+        }
+        
+        // Fallback to database query
+        return array_values($this->get_categories_data(
+            $this->get_options()['custom_root_id'] > 0 
+                ? $this->get_options()['custom_root_id'] 
+                : 0
+        ));
+    }
+
+    /**
+     * Get static JSON URL for a level
+     */
+    private function get_static_json_url($level, $parent_id = null) {
+        if ($level === 1) {
+            return $this->cache_url . '/level-1.json';
+        }
+        
+        // For levels 2+, check if we can use static file
+        $cache_file = $this->cache_dir . "/level-{$level}.json";
+        if (file_exists($cache_file)) {
+            return $this->cache_url . "/level-{$level}.json?v=" . filemtime($cache_file);
+        }
+        
+        return null;
+    }
+
+    /**
+     * Invalidate cache when categories change
+     */
+    public function invalidate_cache() {
+        // Delete all generated JSON files
+        $files = glob($this->cache_dir . '/level-*.json*');
+        foreach ($files as $file) {
+            @unlink($file);
+        }
+        @unlink($this->cache_dir . '/meta.json');
+    }
+
+    /**
+     * AJAX handler for menu generation
+     */
+    public function ajax_generate_menu() {
+        check_ajax_referer('mlcm_admin_nonce', 'security');
+        
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(['message' => 'Permission denied']);
+            wp_die();
+        }
+        
+        $result = $this->generate_static_menus();
+        wp_send_json($result);
         wp_die();
     }
 
+    /**
+     * AJAX handler - fallback for getting subcategories
+     * Used only if static JSON is not available
+     */
     public function ajax_handler() {
-        // Exclude from FlyingPress and other caching plugins
-        $this->prevent_caching();
+        header('Cache-Control: no-cache, no-store, must-revalidate');
         
-        $nonce = sanitize_text_field($_POST['security'] ?? '');
-        
-        if (empty($nonce) && isset($_COOKIE['mlcm_nonce'])) {
-            $nonce = sanitize_text_field($_COOKIE['mlcm_nonce']);
-        }
-        
-        // If nonce is invalid, return error with retry code
-        if (!wp_verify_nonce($nonce, 'mlcm_nonce')) {
-            wp_send_json_error([
-                'message' => 'Invalid nonce',
-                'code' => 'invalid_nonce',
-                'retry' => true
-            ]);
-            wp_die();
-        }
-
         $parent_id = absint($_POST['parent_id'] ?? 0);
         
-        // Validate parent_id
         if ($parent_id < 0) {
             wp_send_json_error(['message' => 'Invalid parent ID']);
             wp_die();
         }
         
-        $cache_key = "mlcm_subcats_{$parent_id}";
+        $categories = $this->get_categories_data($parent_id);
+        $response = array_values($categories); // Convert to indexed array
         
-        // Use get_transient which automatically works with Redis Object Cache
-        $response = get_transient($cache_key);
+        wp_send_json_success($response);
+    }
+
+    private function generate_menu_html($atts) {
+        $options = $this->get_options();
+        $level_1_data = $this->get_level_1_data();
         
-        if (false === $response || !is_array($response)) {
-            // Get categories via common function
-            $response = $this->get_categories_data($parent_id);
-            
-            // Save to cache (already sorted)
-            set_transient($cache_key, $response, WEEK_IN_SECONDS);
-        } else {
-            // IMPORTANT: Always apply force sorting, even for cached data
-            // This ensures correct sorting for all users
-            $this->sort_categories($response);
-        }
+        ob_start(); ?>
+        <div class="mlcm-container <?php echo esc_attr($atts['layout']); ?>" 
+             data-levels="<?php echo absint($atts['levels']); ?>"
+             data-use-static="<?php echo $options['use_static_files'] ? '1' : '0'; ?>"
+             data-static-url="<?php echo esc_url($this->cache_url); ?>">
+            <?php for($i = 1; $i <= $atts['levels']; $i++): ?>
+                <div class="mlcm-level" data-level="<?php echo $i; ?>">
+                    <?php $this->render_select($i, $level_1_data); ?>
+                </div>
+            <?php endfor; ?>
+            <?php if ($options['show_button']): ?>
+                <button type="button" class="mlcm-go-button <?php echo esc_attr($atts['layout']); ?>">
+                    <?php esc_html_e('Go', 'mlcm'); ?>
+                </button>
+            <?php endif; ?>
+        </div>
+        <?php return ob_get_clean();
+    }
+
+    private function render_select($level, $level_1_data = []) {
+        $options = $this->get_options();
+        $label = $options['labels'][$level - 1];
+        $select_id = "mlcm-select-level-{$level}";
+        $label_id = "mlcm-label-level-{$level}";
         
-        // CRITICAL: Convert associative array to indexed array
-        // to preserve order during JSON serialization
-        // JSON objects don't guarantee key order, but arrays do
-        $response_array = [];
-        foreach ($response as $term_id => $data) {
-            $response_array[] = array_merge(['id' => $term_id], $data);
-        }
-        
-        wp_send_json_success($response_array);
+        // Only render options for level 1
+        $categories = ($level === 1) ? $level_1_data : [];
+        ?>
+        <label for="<?= esc_attr($select_id) ?>" id="<?= esc_attr($label_id) ?>" class="mlcm-screen-reader-text">
+            <?= esc_html($label) ?>
+        </label>
+        <select id="<?= esc_attr($select_id) ?>" class="mlcm-select" data-level="<?= $level ?>" 
+                aria-labelledby="<?= esc_attr($label_id) ?>"
+                <?= $level > 1 ? 'disabled' : '' ?>>
+            <option value="-1"><?= esc_html($label) ?></option>
+            <?php foreach ($categories as $cat): ?>
+                <option value="<?= absint($cat['id']) ?>" 
+                        data-slug="<?= esc_attr($cat['slug'] ?? '') ?>" 
+                        data-url="<?= esc_url($cat['url'] ?? '') ?>">
+                    <?= esc_html($cat['name'] ?? '') ?>
+                </option>
+            <?php endforeach; ?>
+        </select>
+        <?php
     }
 
     public function register_settings() {
@@ -501,6 +504,9 @@ class Multi_Level_Category_Menu {
         register_setting('mlcm_options', 'mlcm_custom_root_id', [
             'sanitize_callback' => 'absint'
         ]);
+        register_setting('mlcm_options', 'mlcm_use_static_files', [
+            'sanitize_callback' => 'rest_sanitize_boolean'
+        ]);
 
         for ($i = 1; $i <= 5; $i++) {
             register_setting('mlcm_options', "mlcm_level_{$i}_label", [
@@ -510,7 +516,6 @@ class Multi_Level_Category_Menu {
 
         add_settings_section('mlcm_main', 'Main Settings', null, 'mlcm_options');
 
-        // Use cached options for optimization
         $options = $this->get_options();
 
         add_settings_field('mlcm_font_size', 'Font Size for Menu Items (rem)', function() use ($options) {
@@ -564,6 +569,12 @@ class Multi_Level_Category_Menu {
             echo '<label><input type="checkbox" name="mlcm_use_category_base" value="1" '.checked($use_base, '1', false).'> '.__('Include "category" in URL', 'mlcm').'</label>';
         }, 'mlcm_options', 'mlcm_main');
 
+        add_settings_field('mlcm_use_static', 'Use Static JSON Files', function() use ($options) {
+            $use_static = $options['use_static_files'] ? '1' : '0';
+            echo '<label><input type="checkbox" name="mlcm_use_static_files" value="1" '.checked($use_static, '1', false).'> '.__('Enable static file generation for better performance', 'mlcm').'</label>';
+            echo '<p class="description">When enabled, category data is stored in static JSON files instead of database queries. Click "Generate Menu" to create files.</p>';
+        }, 'mlcm_options', 'mlcm_main');
+
         add_settings_field('mlcm_exclude', 'Excluded Categories', function() use ($options) {
             echo '<input type="text" name="mlcm_excluded_cats" 
                 placeholder="Comma-separated IDs" value="'.esc_attr($options['excluded_cats']).'">';
@@ -583,16 +594,16 @@ class Multi_Level_Category_Menu {
             );
         }
 
-        add_settings_field('mlcm_cache', 'Cache Management', function() {
-            echo '<button type="button" class="button" id="mlcm-clear-cache">
-                '.__('Clear All Caches', 'mlcm').'</button>
-                <span class="spinner" style="float:none; margin-left:10px"></span>';
+        add_settings_field('mlcm_generation', 'Menu Generation', function() {
+            echo '<button type="button" class="button button-primary" id="mlcm-generate-menu">
+                '.__('Generate Menu JSON', 'mlcm').'</button>
+                <span class="spinner" style="float:none; margin-left:10px"></span>
+                <div id="mlcm-generation-status" style="margin-top:10px;"></div>';
         }, 'mlcm_options', 'mlcm_main');
         
-        // Clear options cache when settings are saved
         add_action('update_option', [$this, 'maybe_clear_options_cache'], 10, 2);
     }
-    
+
     /**
      * Clear options cache when settings are updated
      */
@@ -603,7 +614,6 @@ class Multi_Level_Category_Menu {
     }
 
     public function enqueue_frontend_assets() {
-        // Load scripts only if menu exists on page
         if (!$this->has_menu_on_page()) {
             return;
         }
@@ -614,14 +624,14 @@ class Multi_Level_Category_Menu {
             'mlcm-frontend', 
             plugins_url('assets/css/frontend.css', __FILE__),
             [],
-            '3.5.1'
+            '3.6.0'
         );
         
         wp_enqueue_script(
             'mlcm-frontend', 
             plugins_url('assets/js/frontend.js', __FILE__), 
             ['jquery'], 
-            '3.5.1',
+            '3.6.0',
             true
         );
         
@@ -629,6 +639,8 @@ class Multi_Level_Category_Menu {
             'ajax_url' => admin_url('admin-ajax.php'),
             'labels' => $options['labels'],
             'use_category_base' => $options['use_category_base'],
+            'use_static' => $options['use_static_files'],
+            'static_url' => esc_url($this->cache_url),
         ]);
 
         $custom_css = $this->generate_inline_css($options);
@@ -643,66 +655,21 @@ class Multi_Level_Category_Menu {
     private function has_menu_on_page() {
         global $post;
         
-        // Check for shortcode in post/page content
         if ($post && has_shortcode($post->post_content, 'mlcm_menu')) {
             return true;
         }
         
-        // Check for widget via active widgets check
         if (is_active_widget(false, false, 'mlcm_widget', true)) {
             return true;
         }
         
-        // Check for block in content
         if ($post && has_blocks($post->post_content)) {
             if (has_block('mlcm/menu-block', $post->post_content)) {
                 return true;
             }
         }
         
-        // If nothing found, still load (for dynamic content)
-        // But this is better than loading on all pages without check
         return true;
-    }
-
-    public function clear_related_cache($term_id) {
-        $term = get_term($term_id);
-        if (is_wp_error($term) || !$term) {
-            return;
-        }
-        
-        delete_transient("mlcm_subcats_{$term->term_id}");
-        if ($term->parent != 0) {
-            delete_transient("mlcm_subcats_{$term->parent}");
-        } else {
-            delete_transient('mlcm_root_cats');
-        }
-    }
-
-    public function clear_all_caches() {
-        global $wpdb;
-        
-        // Delete via delete_transient (works with Redis Object Cache)
-        delete_transient('mlcm_root_cats');
-        
-        // Also delete directly from DB for compatibility
-        // Redis Object Cache automatically syncs this
-        $result = $wpdb->query(
-            $wpdb->prepare(
-                "DELETE FROM $wpdb->options 
-                WHERE option_name LIKE %s 
-                OR option_name LIKE %s",
-                $wpdb->esc_like('_transient_mlcm_subcats_') . '%',
-                $wpdb->esc_like('_transient_timeout_mlcm_subcats_') . '%'
-            )
-        );
-        
-        // Clear Redis cache if used
-        if (function_exists('wp_cache_flush_group')) {
-            wp_cache_flush_group('transient');
-        }
-        
-        return $result !== false;
     }
 
     public function add_admin_menu() {
@@ -741,8 +708,7 @@ class Multi_Level_Category_Menu {
         $options = $this->get_options();
         $block_editor_file = plugin_dir_path(__FILE__) . 'assets/js/block-editor.js';
         
-        // Check file existence before using filemtime
-        $version = file_exists($block_editor_file) ? filemtime($block_editor_file) : '3.5.1';
+        $version = file_exists($block_editor_file) ? filemtime($block_editor_file) : '3.6.0';
         
         wp_enqueue_script(
             'mlcm-block-editor',
@@ -772,9 +738,9 @@ class Multi_Level_Category_Menu {
                 'ajax_url' => admin_url('admin-ajax.php'),
                 'nonce' => wp_create_nonce('mlcm_admin_nonce'),
                 'i18n' => [
-                    'clearing' => __('Clearing...', 'mlcm'),
-                    'cache_cleared' => __('Cache successfully cleared', 'mlcm'),
-                    'error' => __('Error clearing cache', 'mlcm')
+                    'generating' => __('Generating menu...', 'mlcm'),
+                    'menu_generated' => __('Menu generated successfully', 'mlcm'),
+                    'error' => __('Error generating menu', 'mlcm')
                 ]
             ]);
         }
@@ -782,15 +748,3 @@ class Multi_Level_Category_Menu {
 }
 
 Multi_Level_Category_Menu::get_instance();
-
-add_action('wp_ajax_mlcm_clear_all_caches', function() {
-    check_ajax_referer('mlcm_admin_nonce', 'security');
-    try {
-        $success = Multi_Level_Category_Menu::get_instance()->clear_all_caches();
-        wp_send_json_success(['message' => __('Cache cleared', 'mlcm')]);
-    } catch (Exception $e) {
-        wp_send_json_error(['message' => $e->getMessage()]);
-    }
-    wp_die();
-});
-
