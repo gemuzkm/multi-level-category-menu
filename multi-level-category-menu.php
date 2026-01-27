@@ -39,6 +39,7 @@ class Multi_Level_Category_Menu {
         add_action('wp_ajax_nopriv_mlcm_get_subcategories', [$this, 'ajax_handler']);
         add_action('wp_ajax_mlcm_generate_menu', [$this, 'ajax_generate_menu']);
         add_action('wp_ajax_mlcm_clear_cache', [$this, 'ajax_clear_cache']);
+        add_action('wp_ajax_mlcm_check_cache', [$this, 'ajax_check_cache']);
         
         // Cache invalidation on category changes
         add_action('edited_category', [$this, 'invalidate_cache']);
@@ -429,6 +430,25 @@ class Multi_Level_Category_Menu {
                 __('✓ Кэш успешно удален! Удалено файлов: %d', 'mlcm'),
                 $deleted
             )
+        ]);
+        wp_die();
+    }
+
+    /**
+     * AJAX handler for checking cache existence
+     */
+    public function ajax_check_cache() {
+        check_ajax_referer('mlcm_admin_nonce', 'security');
+        
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error([
+                'message' => __('Permission denied', 'mlcm')
+            ]);
+            wp_die();
+        }
+        
+        wp_send_json_success([
+            'has_cache' => $this->has_cache_files()
         ]);
         wp_die();
     }
