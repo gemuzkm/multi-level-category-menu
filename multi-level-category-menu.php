@@ -2,7 +2,7 @@
 /*
 Plugin Name: Multi-Level Category Menu
 Description: Creates customizable category menus with 5-level depth
-Version: 3.8.0
+Version: 3.6.0
 Author: Name
 Text Domain: mlcm
 */
@@ -12,6 +12,7 @@ defined('ABSPATH') || exit;
 class Multi_Level_Category_Menu {
     private static $instance;
     private $options_cache = null;
+    private $nonce_cache = null;
     private $cache_dir = null;
     private $cache_url = null;
 
@@ -34,12 +35,11 @@ class Multi_Level_Category_Menu {
         add_action('admin_init', [$this, 'register_settings']);
         add_action('admin_menu', [$this, 'add_admin_menu']);
         
-        // AJAX handlers
+        // AJAX handlers - only used as fallback if JS files not available
         add_action('wp_ajax_mlcm_get_subcategories', [$this, 'ajax_handler']);
         add_action('wp_ajax_nopriv_mlcm_get_subcategories', [$this, 'ajax_handler']);
         add_action('wp_ajax_mlcm_generate_menu', [$this, 'ajax_generate_menu']);
-        add_action('wp_ajax_mlcm_clear_cache', [$this, 'ajax_clear_cache']);
-        add_action('wp_ajax_mlcm_check_cache', [$this, 'ajax_check_cache']);
+        add_action('wp_ajax_mlcm_delete_cache', [$this, 'ajax_delete_cache']);
         
         // Cache invalidation on category changes
         add_action('edited_category', [$this, 'invalidate_cache']);
@@ -55,12 +55,17 @@ class Multi_Level_Category_Menu {
     private function init_cache_dir() {
         if (!is_dir($this->cache_dir)) {
             wp_mkdir_p($this->cache_dir);
+            // Create .htaccess to allow direct access to JS files with gzip support
             $htaccess = $this->cache_dir . '/.htaccess';
             if (!file_exists($htaccess)) {
                 $content = "AddType application/javascript .js\n";
                 $content .= "<FilesMatch \"\.js$\">\n";
                 $content .= "  Header set Cache-Control \"public, max-age=604800\"\n";
-                $content .= "  Header set Content-Type \"application/javascript; charset=utf-8\"\n";
+                $content .= "</FilesMatch>\n";
+                $content .= "<FilesMatch \"\.js\.gz$\">\n";
+                $content .= "  Header set Content-Type \"application/javascript\"\n";
+                $content .= "  Header set Content-Encoding gzip\n";
+                $content .= "  Header set Cache-Control \"public, max-age=604800\"\n";
                 $content .= "</FilesMatch>\n";
                 file_put_contents($htaccess, $content);
             }
@@ -112,7 +117,7 @@ class Multi_Level_Category_Menu {
         if (!empty($options['button_bg_color']) && preg_match('/^#[a-fA-F0-9]{6}$/', $options['button_bg_color'])) {
             $css[] = ".mlcm-go-button{background:{$options['button_bg_color']}}";
         }
-        if (!empty($options['button_font_size']) && is_numeric($options['button_font_size'])) {
+        if (!empty($options['button_font_size']) && is_numeric($options['button_button_font_size'])) {
             $css[] = ".mlcm-go-button{font-size:{$options['button_font_size']}rem}";
         }
         if (!empty($options['button_hover_bg_color']) && preg_match('/^#[a-fA-F0-9]{6}$/', $options['button_hover_bg_color'])) {
@@ -195,6 +200,7 @@ class Multi_Level_Category_Menu {
                 continue;
             }
             
+            // Check if category has children
             $children_count = count(get_term_children($category->term_id, 'category'));
             
             $result[$category->term_id] = [
@@ -246,11 +252,16 @@ class Multi_Level_Category_Menu {
         $custom_root_id = $options['custom_root_id'] > 0 ? $options['custom_root_id'] : 0;
         
         try {
+            // Generate level 1 (root categories)
             $level_1_data = $this->get_categories_data($custom_root_id);
+            
+            // Convert to indexed array for consistent ordering
             $level_1_array = array_values($level_1_data);
             
-            $this->write_js_file('level-1', $level_1_array);
+            $this->write_js_file('level-1.js', $level_1_array);
             
+            // Generate data for levels 2-5
+            // Collect all parent IDs to generate their subcategories
             $all_parents = [];
             $current_level_parents = array_keys($level_1_data);
             
@@ -261,77 +272,80 @@ class Multi_Level_Category_Menu {
                 foreach ($current_level_parents as $parent_id) {
                     $subcats = $this->get_categories_data($parent_id);
                     if (!empty($subcats)) {
+                        // Store as indexed array
                         $level_data[$parent_id] = array_values($subcats);
                         $next_level_parents = array_merge($next_level_parents, array_keys($subcats));
                     }
                 }
                 
                 if (!empty($level_data)) {
-                    $this->write_js_file("level-{$level}", $level_data);
+                    $this->write_js_file("level-{$level}.js", $level_data);
                     $current_level_parents = array_unique($next_level_parents);
                 } else {
+                    // No more categories at this level
                     break;
                 }
             }
             
+            // Write metadata
             $meta = [
                 'generated_at' => current_time('mysql'),
                 'generated_timestamp' => time(),
                 'custom_root_id' => $custom_root_id,
                 'levels_count' => $level
             ];
-            $this->write_js_file('meta', $meta);
+            $this->write_js_file('meta.js', $meta);
             
             return [
                 'success' => true,
-                'message' => __('✓ Меню успешно сгенерировано! Категории сохранены в JS-файлах.', 'mlcm'),
-                'timestamp' => current_time('mysql')
+                'message' => 'Menu generated successfully',
+                'levels' => $level - 1
             ];
         } catch (Exception $e) {
             return [
                 'success' => false,
-                'message' => __('✗ Ошибка при генерировании меню: ', 'mlcm') . $e->getMessage(),
-                'timestamp' => current_time('mysql')
+                'message' => $e->getMessage()
             ];
         }
     }
 
     /**
-     * Write JavaScript file with menu data in ES6 module format
+     * Write JavaScript file with gzip compression
      */
     private function write_js_file($filename, $data) {
-        $filepath = $this->cache_dir . '/' . $filename . '.js';
+        $filepath = $this->cache_dir . '/' . $filename;
+        
+        // Determine variable name based on filename
+        $var_name = 'mlcmData';
+        if (preg_match('/level-(\d+)\.js$/', $filename, $matches)) {
+            $var_name = 'mlcmLevel' . $matches[1];
+        } elseif (preg_match('/meta\.js$/', $filename)) {
+            $var_name = 'mlcmMeta';
+        }
+        
+        // Convert data to JavaScript format
         $json = json_encode($data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
         
         if (json_last_error() !== JSON_ERROR_NONE) {
             throw new Exception('JSON encoding error: ' . json_last_error_msg());
         }
         
-        // Format: export const menuData = {...}; 
-        $js_content = 'export const ' . preg_replace('/[^a-z0-9]/i', '', ucwords(str_replace('-', ' ', $filename), ' ')) . ' = ' . $json . ';';
+        // Create JavaScript file content
+        $js_content = "window.{$var_name} = {$json};";
         
-        // Also add legacy format for backward compatibility
-        $js_content .= "\n// Legacy format for backward compatibility\n";
-        $js_content .= 'window.mlcmData=window.mlcmData||{}; window.mlcmData["' . esc_attr($filename) . '"]=' . $json . ';';
-        
+        // Write normal JS file
         if (file_put_contents($filepath, $js_content) === false) {
             throw new Exception("Failed to write file: {$filepath}");
         }
-    }
-
-    /**
-     * Get list of generated cache files
-     */
-    private function get_cache_files() {
-        $files = glob($this->cache_dir . '/*.js');
-        return is_array($files) ? $files : [];
-    }
-
-    /**
-     * Check if cache files exist
-     */
-    public function has_cache_files() {
-        return !empty($this->get_cache_files());
+        
+        // Try to write gzipped version if zlib available
+        if (extension_loaded('zlib')) {
+            $gz_filepath = $filepath . '.gz';
+            $gz_data = gzencode($js_content, 9);
+            if ($gz_data !== false) {
+                file_put_contents($gz_filepath, $gz_data);
+            }
+        }
     }
 
     /**
@@ -340,22 +354,22 @@ class Multi_Level_Category_Menu {
     private function get_level_1_data() {
         $cache_file = $this->cache_dir . '/level-1.js';
         
+        // Try to read from static file first
         if (file_exists($cache_file)) {
             $content = file_get_contents($cache_file);
             if ($content !== false) {
-                // Try new format first (export const)
-                preg_match('/export const \w+ = (.+?);/', $content, $matches);
-                if (!empty($matches[1])) {
-                    return json_decode($matches[1], true);
-                }
-                // Fallback to legacy format
-                preg_match('/window\.mlcmData\["level-1"\]=(.+?);/', $content, $matches);
-                if (!empty($matches[1])) {
-                    return json_decode($matches[1], true);
+                // Extract JSON from JavaScript file
+                if (preg_match('/window\.mlcmLevel1\s*=\s*(.+?);?\s*$/s', $content, $matches)) {
+                    $json_data = trim($matches[1]);
+                    $decoded = json_decode($json_data, true);
+                    if (json_last_error() === JSON_ERROR_NONE) {
+                        return $decoded;
+                    }
                 }
             }
         }
         
+        // Fallback to database query
         return array_values($this->get_categories_data(
             $this->get_options()['custom_root_id'] > 0 
                 ? $this->get_options()['custom_root_id'] 
@@ -364,40 +378,49 @@ class Multi_Level_Category_Menu {
     }
 
     /**
-     * Invalidate cache when categories change
+     * Get static JS URL for a level
      */
-    public function invalidate_cache() {
-        $files = glob($this->cache_dir . '/level-*.js');
-        if ($files) {
-            foreach ($files as $file) {
-                @unlink($file);
-            }
+    private function get_static_js_url($level, $parent_id = null) {
+        if ($level === 1) {
+            return $this->cache_url . '/level-1.js';
         }
-        @unlink($this->cache_dir . '/meta.js');
+        
+        // For levels 2+, check if we can use static file
+        $cache_file = $this->cache_dir . "/level-{$level}.js";
+        if (file_exists($cache_file)) {
+            return $this->cache_url . "/level-{$level}.js?v=" . filemtime($cache_file);
+        }
+        
+        return null;
     }
 
     /**
-     * Clear all cache files
+     * Get file modification times for cache versioning
      */
-    private function clear_all_cache() {
-        $files = $this->get_cache_files();
-        $deleted_count = 0;
-        
-        if (!empty($files)) {
-            foreach ($files as $file) {
-                if (is_file($file) && @unlink($file)) {
-                    $deleted_count++;
-                }
+    private function get_file_versions() {
+        $versions = [];
+        for ($level = 1; $level <= 5; $level++) {
+            $cache_file = $this->cache_dir . "/level-{$level}.js";
+            if (file_exists($cache_file)) {
+                $versions[$level] = filemtime($cache_file);
+            } else {
+                $versions[$level] = 0;
             }
         }
-        
-        // Also try to remove .htaccess
-        $htaccess = $this->cache_dir . '/.htaccess';
-        if (file_exists($htaccess)) {
-            @unlink($htaccess);
+        return $versions;
+    }
+
+    /**
+     * Invalidate cache when categories change
+     */
+    public function invalidate_cache() {
+        // Delete all generated JS files
+        $files = glob($this->cache_dir . '/level-*.js*');
+        foreach ($files as $file) {
+            @unlink($file);
         }
-        
-        return $deleted_count;
+        @unlink($this->cache_dir . '/meta.js');
+        @unlink($this->cache_dir . '/meta.js.gz');
     }
 
     /**
@@ -407,10 +430,7 @@ class Multi_Level_Category_Menu {
         check_ajax_referer('mlcm_admin_nonce', 'security');
         
         if (!current_user_can('manage_options')) {
-            wp_send_json_error([
-                'message' => __('Permission denied', 'mlcm'),
-                'timestamp' => current_time('mysql')
-            ]);
+            wp_send_json_error(['message' => 'Permission denied']);
             wp_die();
         }
         
@@ -425,54 +445,34 @@ class Multi_Level_Category_Menu {
     }
 
     /**
-     * AJAX handler for clearing cache
+     * AJAX handler for cache deletion
      */
-    public function ajax_clear_cache() {
+    public function ajax_delete_cache() {
         check_ajax_referer('mlcm_admin_nonce', 'security');
         
         if (!current_user_can('manage_options')) {
-            wp_send_json_error([
-                'message' => __('Permission denied', 'mlcm'),
-                'timestamp' => current_time('mysql')
-            ]);
+            wp_send_json_error(['message' => 'Permission denied']);
             wp_die();
         }
         
-        $deleted = $this->clear_all_cache();
-        
-        wp_send_json_success([
-            'message' => sprintf(
-                __('✓ Кэш успешно удален! Удалено файлов: %d', 'mlcm'),
-                $deleted
-            ),
-            'deleted_count' => $deleted,
-            'timestamp' => current_time('mysql')
-        ]);
-        wp_die();
-    }
-
-    /**
-     * AJAX handler for checking cache existence
-     */
-    public function ajax_check_cache() {
-        check_ajax_referer('mlcm_admin_nonce', 'security');
-        
-        if (!current_user_can('manage_options')) {
-            wp_send_json_error([
-                'message' => __('Permission denied', 'mlcm'),
-                'timestamp' => current_time('mysql')
+        try {
+            $this->invalidate_cache();
+            wp_send_json_success([
+                'message' => 'Cache files deleted successfully',
+                'success' => true
             ]);
-            wp_die();
+        } catch (Exception $e) {
+            wp_send_json_error([
+                'message' => 'Error deleting cache: ' . $e->getMessage(),
+                'success' => false
+            ]);
         }
-        
-        wp_send_json_success([
-            'has_cache' => $this->has_cache_files()
-        ]);
         wp_die();
     }
 
     /**
      * AJAX handler - fallback for getting subcategories
+     * Used only if static JS files are not available
      */
     public function ajax_handler() {
         header('Cache-Control: no-cache, no-store, must-revalidate');
@@ -485,7 +485,7 @@ class Multi_Level_Category_Menu {
         }
         
         $categories = $this->get_categories_data($parent_id);
-        $response = array_values($categories);
+        $response = array_values($categories); // Convert to indexed array
         
         wp_send_json_success($response);
     }
@@ -519,6 +519,7 @@ class Multi_Level_Category_Menu {
         $select_id = "mlcm-select-level-{$level}";
         $label_id = "mlcm-label-level-{$level}";
         
+        // Only render options for level 1
         $categories = ($level === 1) ? $level_1_data : [];
         ?>
         <label for="<?= esc_attr($select_id) ?>" id="<?= esc_attr($label_id) ?>" class="mlcm-screen-reader-text">
@@ -644,7 +645,7 @@ class Multi_Level_Category_Menu {
         add_settings_field('mlcm_use_static', 'Use Static JavaScript Files', function() use ($options) {
             $use_static = $options['use_static_files'] ? '1' : '0';
             echo '<label><input type="checkbox" name="mlcm_use_static_files" value="1" '.checked($use_static, '1', false).'> '.__('Enable static file generation for better performance', 'mlcm').'</label>';
-            echo '<p class="description">When enabled, category data is stored in static JavaScript files for optimal caching with Cloudflare and other CDNs.</p>';
+            echo '<p class="description">When enabled, category data is stored in static JavaScript files instead of database queries. Click "Generate Menu" to create files.</p>';
         }, 'mlcm_options', 'mlcm_main');
 
         add_settings_field('mlcm_exclude', 'Excluded Categories', function() use ($options) {
@@ -666,27 +667,14 @@ class Multi_Level_Category_Menu {
             );
         }
 
-        add_settings_field('mlcm_generation', 'Cache Management', function() {
-            $has_cache = $this->has_cache_files();
-            $cache_files = $this->get_cache_files();
-            
-            echo '<div style="margin-bottom: 15px;">';
-            echo '<button type="button" class="button button-primary" id="mlcm-generate-menu">';
-            echo __('Generate Menu Cache (JS)', 'mlcm');
-            echo '</button>';
-            echo ' <button type="button" class="button button-secondary" id="mlcm-clear-cache" style="margin-left: 10px;"' . (!$has_cache ? ' disabled' : '') . '>';
-            echo __('Delete Cache', 'mlcm');
-            echo '</button>';
-            echo '<span class="spinner" style="float:none; margin-left:10px;"></span>';
-            echo '</div>';
-            
-            if ($has_cache) {
-                echo '<p style="color: #28a745; margin: 10px 0;"><strong>✓ Кэш сгенерирован (' . count($cache_files) . ' файлов)</strong></p>';
-            } else {
-                echo '<p style="color: #6c757d; margin: 10px 0;">Кэш не сгенерирован. Нажмите кнопку выше для создания.</p>';
-            }
-            
-            echo '<div id="mlcm-generation-status" style="margin-top:15px;"></div>';
+        add_settings_field('mlcm_generation', 'Menu Generation', function() {
+            echo '<button type="button" class="button button-primary" id="mlcm-generate-menu">
+                '.__('Generate Menu Files', 'mlcm').'</button>
+                <span class="spinner" style="float:none; margin-left:10px"></span>
+                <button type="button" class="button button-secondary" id="mlcm-delete-cache" style="margin-left:10px;">
+                '.__('Delete Cache Files', 'mlcm').'</button>
+                <span class="spinner" style="float:none; margin-left:10px"></span>
+                <div id="mlcm-generation-status" style="margin-top:10px;"></div>';
         }, 'mlcm_options', 'mlcm_main');
         
         add_action('update_option', [$this, 'maybe_clear_options_cache'], 10, 2);
@@ -712,16 +700,19 @@ class Multi_Level_Category_Menu {
             'mlcm-frontend', 
             plugins_url('assets/css/frontend.css', __FILE__),
             [],
-            '3.8.0'
+            '3.6.0'
         );
         
         wp_enqueue_script(
             'mlcm-frontend', 
             plugins_url('assets/js/frontend.js', __FILE__), 
             ['jquery'], 
-            '3.8.0',
+            '3.6.0',
             true
         );
+        
+        // Get file versions for cache versioning
+        $file_versions = $this->get_file_versions();
         
         wp_localize_script('mlcm-frontend', 'mlcmVars', [
             'ajax_url' => admin_url('admin-ajax.php'),
@@ -729,6 +720,7 @@ class Multi_Level_Category_Menu {
             'use_category_base' => $options['use_category_base'],
             'use_static' => $options['use_static_files'],
             'static_url' => esc_url($this->cache_url),
+            'file_versions' => $file_versions,
         ]);
 
         $custom_css = $this->generate_inline_css($options);
@@ -796,7 +788,7 @@ class Multi_Level_Category_Menu {
         $options = $this->get_options();
         $block_editor_file = plugin_dir_path(__FILE__) . 'assets/js/block-editor.js';
         
-        $version = file_exists($block_editor_file) ? filemtime($block_editor_file) : '3.8.0';
+        $version = file_exists($block_editor_file) ? filemtime($block_editor_file) : '3.6.0';
         
         wp_enqueue_script(
             'mlcm-block-editor',
@@ -826,12 +818,13 @@ class Multi_Level_Category_Menu {
                 'ajax_url' => admin_url('admin-ajax.php'),
                 'nonce' => wp_create_nonce('mlcm_admin_nonce'),
                 'i18n' => [
-                    'generating' => __('Generating menu cache...', 'mlcm'),
-                    'clearing' => __('Clearing cache...', 'mlcm'),
-                    'menu_generated' => __('Menu cache generated successfully!', 'mlcm'),
-                    'cache_cleared' => __('Cache cleared successfully!', 'mlcm'),
-                    'error' => __('Error', 'mlcm'),
-                    'confirm_clear' => __('Are you sure you want to clear all cache files?', 'mlcm')
+                    'generating' => __('Generating menu...', 'mlcm'),
+                    'menu_generated' => __('Menu generated successfully', 'mlcm'),
+                    'error' => __('Error generating menu', 'mlcm'),
+                    'deleting' => __('Deleting cache files...', 'mlcm'),
+                    'cache_deleted' => __('Cache files deleted successfully', 'mlcm'),
+                    'delete_error' => __('Error deleting cache files', 'mlcm'),
+                    'confirm_delete' => __('Are you sure you want to delete all cache files?', 'mlcm')
                 ]
             ]);
         }
