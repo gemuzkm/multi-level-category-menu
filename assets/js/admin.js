@@ -7,48 +7,61 @@ jQuery(function($) {
     if (!$genBtn.length) return;
 
     /**
-     * Отображение сообщения и автоудаление через 5 секунд
+     * Display message and auto-hide after 5 seconds
      */
     function showMessage(message, isSuccess = true) {
         const noticeClass = isSuccess ? 'notice-success' : 'notice-error';
         const icon = isSuccess ? '✓' : '✕';
-        const html = `<div class="notice ${noticeClass} is-dismissible notice-mlcm" data-dismissible="mlcm">
-            <p>${icon} ${message}</p>
-            <button type="button" class="notice-dismiss" style="position: absolute; top: 5px; right: 5px; background: none; border: none; padding: 0; cursor: pointer; font-size: 20px;">×</button>
-        </div>`;
+        const html = `<div class="notice ${noticeClass} is-dismissible notice-mlcm" data-dismissible="mlcm" style="animation: slideIn 0.3s ease-in;">
+            <p><strong>${icon}</strong> ${message}</p>
+            <button type="button" class="notice-dismiss" style="position: absolute; top: 5px; right: 5px; background: none; border: none; padding: 0; cursor: pointer; font-size: 20px; color: inherit;">×</button>
+        </div>
+        <style>
+            @keyframes slideIn {
+                from { opacity: 0; transform: translateY(-10px); }
+                to { opacity: 1; transform: translateY(0); }
+            }
+            @keyframes slideOut {
+                from { opacity: 1; transform: translateY(0); }
+                to { opacity: 0; transform: translateY(-10px); }
+            }
+            .notice-mlcm { animation: slideIn 0.3s ease-in; }
+            .notice-mlcm.removing { animation: slideOut 0.3s ease-out forwards; }
+        </style>`;
         
         $status.html(html);
         
-        // Обработка кнопки закрытия
+        // Dismiss button handler
         $status.find('.notice-dismiss').on('click', function() {
             removeNotice();
         });
         
-        // Автоудаление через 5 секунд
+        // Auto-hide after 5 seconds
         const timeout = setTimeout(function() {
             removeNotice();
         }, 5000);
         
-        // Сохранить timeout для возможной очистки
         $status.data('timeout', timeout);
     }
 
     /**
-     * Удаление уведомления с анимацией
+     * Remove notification with animation
      */
     function removeNotice() {
         const timeout = $status.data('timeout');
         if (timeout) {
             clearTimeout(timeout);
         }
-        $status.fadeOut(200, function() {
+        
+        $status.find('.notice-mlcm').addClass('removing');
+        
+        setTimeout(function() {
             $status.html('');
-            $status.show();
-        });
+        }, 300);
     }
 
     /**
-     * Обновление состояния кнопки Delete Cache
+     * Update Delete Cache button state
      */
     function updateClearButtonState() {
         $.ajax({
@@ -68,11 +81,13 @@ jQuery(function($) {
         });
     }
     
-    // Генерирование меню
+    /**
+     * Generate Menu Button Handler
+     */
     $genBtn.on('click', function(e) {
         e.preventDefault();
         
-        // Очистить старое сообщение
+        // Clear previous message timeout
         clearTimeout($status.data('timeout'));
         
         $spinner.addClass('is-active');
@@ -90,7 +105,7 @@ jQuery(function($) {
                 $spinner.removeClass('is-active');
                 $genBtn.prop('disabled', false);
                 
-                if (response.success || response.data.success) {
+                if (response.success || (response.data && response.data.success)) {
                     const message = response.data.message || mlcmAdmin.i18n.menu_generated;
                     showMessage(message, true);
                     updateClearButtonState();
@@ -107,7 +122,9 @@ jQuery(function($) {
         });
     });
     
-    // Удаление кэша
+    /**
+     * Delete Cache Button Handler
+     */
     $clearBtn.on('click', function(e) {
         e.preventDefault();
         
@@ -115,7 +132,7 @@ jQuery(function($) {
             return;
         }
         
-        // Очистить старое сообщение
+        // Clear previous message timeout
         clearTimeout($status.data('timeout'));
         
         $spinner.addClass('is-active');
@@ -150,6 +167,6 @@ jQuery(function($) {
         });
     });
     
-    // Инициализация состояния кнопки при загрузке
+    // Initialize button states on page load
     updateClearButtonState();
 });
