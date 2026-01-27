@@ -2,7 +2,7 @@
 /*
 Plugin Name: Multi-Level Category Menu
 Description: Creates customizable category menus with 5-level depth
-Version: 3.7.0
+Version: 3.8.0
 Author: Name
 Text Domain: mlcm
 */
@@ -284,18 +284,20 @@ class Multi_Level_Category_Menu {
             
             return [
                 'success' => true,
-                'message' => __('✓ Меню успешно сгенерировано! Категории сохранены в JS-файлах.', 'mlcm')
+                'message' => __('✓ Меню успешно сгенерировано! Категории сохранены в JS-файлах.', 'mlcm'),
+                'timestamp' => current_time('mysql')
             ];
         } catch (Exception $e) {
             return [
                 'success' => false,
-                'message' => __('✗ Ошибка при генерировании меню: ', 'mlcm') . $e->getMessage()
+                'message' => __('✗ Ошибка при генерировании меню: ', 'mlcm') . $e->getMessage(),
+                'timestamp' => current_time('mysql')
             ];
         }
     }
 
     /**
-     * Write JavaScript file with menu data
+     * Write JavaScript file with menu data in ES6 module format
      */
     private function write_js_file($filename, $data) {
         $filepath = $this->cache_dir . '/' . $filename . '.js';
@@ -305,7 +307,12 @@ class Multi_Level_Category_Menu {
             throw new Exception('JSON encoding error: ' . json_last_error_msg());
         }
         
-        $js_content = 'window.mlcmData=window.mlcmData||{}; window.mlcmData["' . esc_attr($filename) . '"]=' . $json . ';';
+        // Format: export const menuData = {...}; 
+        $js_content = 'export const ' . preg_replace('/[^a-z0-9]/i', '', ucwords(str_replace('-', ' ', $filename), ' ')) . ' = ' . $json . ';';
+        
+        // Also add legacy format for backward compatibility
+        $js_content .= "\n// Legacy format for backward compatibility\n";
+        $js_content .= 'window.mlcmData=window.mlcmData||{}; window.mlcmData["' . esc_attr($filename) . '"]=' . $json . ';';
         
         if (file_put_contents($filepath, $js_content) === false) {
             throw new Exception("Failed to write file: {$filepath}");
@@ -336,7 +343,13 @@ class Multi_Level_Category_Menu {
         if (file_exists($cache_file)) {
             $content = file_get_contents($cache_file);
             if ($content !== false) {
-                preg_match('/window\.mlcmData\["level-1"\]=(.+?);$/', $content, $matches);
+                // Try new format first (export const)
+                preg_match('/export const \w+ = (.+?);/', $content, $matches);
+                if (!empty($matches[1])) {
+                    return json_decode($matches[1], true);
+                }
+                // Fallback to legacy format
+                preg_match('/window\.mlcmData\["level-1"\]=(.+?);/', $content, $matches);
                 if (!empty($matches[1])) {
                     return json_decode($matches[1], true);
                 }
@@ -395,7 +408,8 @@ class Multi_Level_Category_Menu {
         
         if (!current_user_can('manage_options')) {
             wp_send_json_error([
-                'message' => __('Permission denied', 'mlcm')
+                'message' => __('Permission denied', 'mlcm'),
+                'timestamp' => current_time('mysql')
             ]);
             wp_die();
         }
@@ -418,7 +432,8 @@ class Multi_Level_Category_Menu {
         
         if (!current_user_can('manage_options')) {
             wp_send_json_error([
-                'message' => __('Permission denied', 'mlcm')
+                'message' => __('Permission denied', 'mlcm'),
+                'timestamp' => current_time('mysql')
             ]);
             wp_die();
         }
@@ -429,7 +444,9 @@ class Multi_Level_Category_Menu {
             'message' => sprintf(
                 __('✓ Кэш успешно удален! Удалено файлов: %d', 'mlcm'),
                 $deleted
-            )
+            ),
+            'deleted_count' => $deleted,
+            'timestamp' => current_time('mysql')
         ]);
         wp_die();
     }
@@ -442,7 +459,8 @@ class Multi_Level_Category_Menu {
         
         if (!current_user_can('manage_options')) {
             wp_send_json_error([
-                'message' => __('Permission denied', 'mlcm')
+                'message' => __('Permission denied', 'mlcm'),
+                'timestamp' => current_time('mysql')
             ]);
             wp_die();
         }
@@ -650,6 +668,8 @@ class Multi_Level_Category_Menu {
 
         add_settings_field('mlcm_generation', 'Cache Management', function() {
             $has_cache = $this->has_cache_files();
+            $cache_files = $this->get_cache_files();
+            
             echo '<div style="margin-bottom: 15px;">';
             echo '<button type="button" class="button button-primary" id="mlcm-generate-menu">';
             echo __('Generate Menu Cache (JS)', 'mlcm');
@@ -661,8 +681,7 @@ class Multi_Level_Category_Menu {
             echo '</div>';
             
             if ($has_cache) {
-                $files = $this->get_cache_files();
-                echo '<p style="color: #28a745; margin: 10px 0;"><strong>✓ Кэш сгенерирован (' . count($files) . ' файлов)</strong></p>';
+                echo '<p style="color: #28a745; margin: 10px 0;"><strong>✓ Кэш сгенерирован (' . count($cache_files) . ' файлов)</strong></p>';
             } else {
                 echo '<p style="color: #6c757d; margin: 10px 0;">Кэш не сгенерирован. Нажмите кнопку выше для создания.</p>';
             }
@@ -693,14 +712,14 @@ class Multi_Level_Category_Menu {
             'mlcm-frontend', 
             plugins_url('assets/css/frontend.css', __FILE__),
             [],
-            '3.7.0'
+            '3.8.0'
         );
         
         wp_enqueue_script(
             'mlcm-frontend', 
             plugins_url('assets/js/frontend.js', __FILE__), 
             ['jquery'], 
-            '3.7.0',
+            '3.8.0',
             true
         );
         
@@ -777,7 +796,7 @@ class Multi_Level_Category_Menu {
         $options = $this->get_options();
         $block_editor_file = plugin_dir_path(__FILE__) . 'assets/js/block-editor.js';
         
-        $version = file_exists($block_editor_file) ? filemtime($block_editor_file) : '3.7.0';
+        $version = file_exists($block_editor_file) ? filemtime($block_editor_file) : '3.8.0';
         
         wp_enqueue_script(
             'mlcm-block-editor',
