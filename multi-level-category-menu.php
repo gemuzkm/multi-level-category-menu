@@ -36,6 +36,9 @@ class MLCMCacheManager {
         add_action('created_term', [$this, 'invalidate_cache_on_term_create'], 10, 3);
         add_action('admin_init', [$this, 'register_settings']);
         add_action('admin_menu', [$this, 'add_settings_page']);
+        add_shortcode('mlcm_menu', [$this, 'render_menu_shortcode']);
+        add_action('wp_enqueue_scripts', [$this, 'enqueue_frontend_scripts']);
+        add_action('wp_footer', [$this, 'output_menu_script']);
     }
 
     /**
@@ -50,7 +53,7 @@ class MLCMCacheManager {
 
         $categories = get_terms([
             'taxonomy' => 'product_cat',
-            'hide_empty' => true,
+            'hide_empty' => false,
             'parent' => 0,
             'number' => 500
         ]);
@@ -116,7 +119,7 @@ class MLCMCacheManager {
 
                 $children = get_terms([
                     'taxonomy' => 'product_cat',
-                    'hide_empty' => true,
+                    'hide_empty' => false,
                     'parent' => $category->term_id,
                     'number' => 500
                 ]);
@@ -124,7 +127,7 @@ class MLCMCacheManager {
                 if (!empty($children) && !is_wp_error($children)) {
                     $item['has_children'] = true;
                     if ($current_level < $this->max_levels) {
-                        $item['children'] = $this->build_level_structure($categories, $category->term_id, $current_level + 1);
+                        $item['children'] = $this->build_level_structure($children, $category->term_id, $current_level + 1);
                     }
                 } else {
                     $item['has_children'] = false;
@@ -214,7 +217,7 @@ EOT;
         $result = [];
         $all_cats = get_terms([
             'taxonomy' => 'product_cat',
-            'hide_empty' => true,
+            'hide_empty' => false,
             'number' => 1000
         ]);
 
@@ -227,7 +230,7 @@ EOT;
             if (count($ancestors) == $level - 1) {
                 $children = get_terms([
                     'taxonomy' => 'product_cat',
-                    'hide_empty' => true,
+                    'hide_empty' => false,
                     'parent' => $cat->term_id,
                     'number' => 500
                 ]);
@@ -307,6 +310,140 @@ EOT;
     }
 
     /**
+     * Enqueue frontend styles and scripts
+     */
+    public function enqueue_frontend_scripts() {
+        if (!class_exists('WooCommerce')) return;
+        
+        wp_enqueue_style(
+            'mlcm-frontend',
+            MLCM_PLUGIN_URL . 'assets/css/frontend.css',
+            [],
+            MLCM_VERSION
+        );
+
+        wp_enqueue_script(
+            'mlcm-frontend',
+            MLCM_PLUGIN_URL . 'assets/js/frontend.js',
+            ['jquery'],
+            MLCM_VERSION,
+            true
+        );
+
+        wp_localize_script('mlcm-frontend', 'mlcm_config', [
+            'cache_url' => WP_CONTENT_URL . '/uploads/mlcm-menu-cache/',
+            'version' => MLCM_VERSION,
+            'nonce' => wp_create_nonce('mlcm_nonce')
+        ]);
+    }
+
+    /**
+     * Output menu script to footer
+     */
+    public function output_menu_script() {
+        if (!class_exists('WooCommerce')) return;
+        ?>
+        <script type="text/javascript">
+        document.addEventListener('DOMContentLoaded', function() {
+            var cacheUrl = '<?php echo esc_js(WP_CONTENT_URL . '/uploads/mlcm-menu-cache/'); ?>';
+            
+            // Load level-1 cache file
+            var script = document.createElement('script');
+            script.src = cacheUrl + 'level-1.js?v=<?php echo esc_js(MLCM_VERSION); ?>';
+            script.async = true;
+            document.body.appendChild(script);
+        });
+        </script>
+        <?php
+    }
+
+    /**
+     * Render menu shortcode
+     */
+    public function render_menu_shortcode($atts = []) {
+        if (!class_exists('WooCommerce')) {
+            return '<p>' . __('WooCommerce is required for this menu', 'multi-level-category-menu') . '</p>';
+        }
+
+        $atts = shortcode_atts([
+            'style' => 'list',
+            'columns' => 3,
+            'show_count' => true,
+            'level' => 2
+        ], $atts);
+
+        $categories = get_terms([
+            'taxonomy' => 'product_cat',
+            'hide_empty' => false,
+            'parent' => 0,
+            'number' => 500
+        ]);
+
+        if (is_wp_error($categories) || empty($categories)) {
+            return '<p>' . __('No categories found', 'multi-level-category-menu') . '</p>';
+        }
+
+        $html = '<div class="mlcm-menu mlcm-menu-' . esc_attr($atts['style']) . '">';
+
+        if ($atts['style'] === 'grid') {
+            $html .= '<div class="mlcm-grid" style="display: grid; grid-template-columns: repeat(' . intval($atts['columns']) . ', 1fr); gap: 20px;">';
+        } else {
+            $html .= '<ul class="mlcm-list">';
+        }
+
+        foreach ($categories as $category) {
+            $count = intval($atts['show_count']) ? ' (' . $category->count . ')' : '';
+            $category_url = get_term_link($category->term_id, 'product_cat');
+
+            if ($atts['style'] === 'grid') {
+                $html .= '<div class="mlcm-category">';
+                $html .= '<a href="' . esc_url($category_url) . '" class="mlcm-link">' . esc_html($category->name) . $count . '</a>';
+            } else {
+                $html .= '<li class="mlcm-item">';
+                $html .= '<a href="' . esc_url($category_url) . '" class="mlcm-link">' . esc_html($category->name) . $count . '</a>';
+            }
+
+            // Add subcategories if level > 1
+            if (intval($atts['level']) > 1) {
+                $children = get_terms([
+                    'taxonomy' => 'product_cat',
+                    'hide_empty' => false,
+                    'parent' => $category->term_id,
+                    'number' => 500
+                ]);
+
+                if (!empty($children) && !is_wp_error($children)) {
+                    $html .= '<ul class="mlcm-children">';
+                    foreach ($children as $child) {
+                        $child_count = intval($atts['show_count']) ? ' (' . $child->count . ')' : '';
+                        $child_url = get_term_link($child->term_id, 'product_cat');
+                        $html .= '<li class="mlcm-child-item">';
+                        $html .= '<a href="' . esc_url($child_url) . '" class="mlcm-child-link">' . esc_html($child->name) . $child_count . '</a>';
+                        $html .= '</li>';
+                    }
+                    $html .= '</ul>';
+                }
+            }
+
+            if ($atts['style'] === 'grid') {
+                $html .= '</div>';
+            } else {
+                $html .= '</li>';
+            }
+        }
+
+        if ($atts['style'] === 'grid') {
+            $html .= '</div>';
+        } else {
+            $html .= '</ul>';
+        }
+
+        $html .= '</div>';
+
+        return $html;
+    }
+
+    /**
      * Render settings page
      */
     public function render_settings_page() {
@@ -320,6 +457,25 @@ EOT;
                     <?php _e('Menu data is now cached as JavaScript files (.js) instead of JSON. This format is cached by Cloudflare automatically (HIT status) and provides 5x better performance.', 'multi-level-category-menu'); ?>
                 </p>
             </div>
+
+            <h2><?php _e('Usage', 'multi-level-category-menu'); ?></h2>
+            <p><?php _e('Add this shortcode to any page or post to display the menu:', 'multi-level-category-menu'); ?></p>
+            <code>[mlcm_menu]</code>
+
+            <h3><?php _e('Shortcode Parameters:', 'multi-level-category-menu'); ?></h3>
+            <ul style="margin-left: 20px; list-style-type: disc;">
+                <li><code>style="list"</code> - Menu style: list or grid (default: list)</li>
+                <li><code>columns="3"</code> - Grid columns (default: 3, for grid style only)</li>
+                <li><code>show_count="true"</code> - Show product count (default: true)</li>
+                <li><code>level="2"</code> - Show subcategories levels (default: 2)</li>
+            </ul>
+
+            <h3><?php _e('Examples:', 'multi-level-category-menu'); ?></h3>
+            <ul style="margin-left: 20px; list-style-type: disc;">
+                <li><code>[mlcm_menu style="list" level="2"]</code> - List with 2 levels</li>
+                <li><code>[mlcm_menu style="grid" columns="3" level="1"]</code> - 3-column grid with main categories only</li>
+                <li><code>[mlcm_menu show_count="false"]</code> - List without product counts</li>
+            </ul>
 
             <div class="mlcm-cache-info" style="background: #f5f5f5; padding: 20px; margin: 20px 0; border-radius: 5px;">
                 <h3><?php _e('Cache Information', 'multi-level-category-menu'); ?></h3>
@@ -389,8 +545,8 @@ EOT;
                     e.preventDefault();
                     var $btn = $(this);
                     var $status = $('#mlcm-status');
-                    $btn.prop('disabled', true).text('Generating...');
-                    $status.removeClass('success error').text('Generating...');
+                    $btn.prop('disabled', true).text('<?php _e('Generating...', 'multi-level-category-menu'); ?>');
+                    $status.removeClass('success error').text('<?php _e('Generating...', 'multi-level-category-menu'); ?>');
 
                     $.ajax({
                         type: 'POST',
@@ -400,29 +556,50 @@ EOT;
                             nonce: '<?php echo wp_create_nonce('mlcm_nonce'); ?>'
                         },
                         success: function(response) {
-                            $btn.prop('disabled', false);
+                            $btn.prop('disabled', false).text('<?php _e('Generate Menu JavaScript Files', 'multi-level-category-menu'); ?>');
                             if (response.success) {
-                                $status.addClass('success').text('✓ Cache generated successfully!');
+                                $status.addClass('success').text('✓ <?php _e('Cache generated successfully!', 'multi-level-category-menu'); ?>');
                                 setTimeout(function() { location.reload(); }, 2000);
                             } else {
-                                $status.addClass('error').text('✗ Error: ' + response.data);
+                                $status.addClass('error').text('✗ <?php _e('Error:', 'multi-level-category-menu'); ?> ' + response.data);
                             }
                         },
                         error: function() {
-                            $btn.prop('disabled', false);
-                            $status.addClass('error').text('✗ AJAX Error');
+                            $btn.prop('disabled', false).text('<?php _e('Generate Menu JavaScript Files', 'multi-level-category-menu'); ?>');
+                            $status.addClass('error').text('✗ AJAX <?php _e('Error', 'multi-level-category-menu'); ?>');
                         }
                     });
                 });
 
                 $('#mlcm-clear-btn').on('click', function(e) {
                     e.preventDefault();
-                    if (!confirm('Clear all cache files?')) return;
+                    if (!confirm('<?php _e('Clear all cache files?', 'multi-level-category-menu'); ?>')) return;
                     var $btn = $(this);
                     var $status = $('#mlcm-status');
-                    $btn.prop('disabled', true).text('Clearing...');
-                    $status.removeClass('success error').text('Clearing...');
-                    // Clear logic here
+                    $btn.prop('disabled', true).text('<?php _e('Clearing...', 'multi-level-category-menu'); ?>');
+                    $status.removeClass('success error').text('<?php _e('Clearing...', 'multi-level-category-menu'); ?>');
+                    
+                    $.ajax({
+                        type: 'POST',
+                        url: ajaxurl,
+                        data: {
+                            action: 'mlcm_clear_cache',
+                            nonce: '<?php echo wp_create_nonce('mlcm_nonce'); ?>'
+                        },
+                        success: function(response) {
+                            $btn.prop('disabled', false).text('<?php _e('Clear Cache', 'multi-level-category-menu'); ?>');
+                            if (response.success) {
+                                $status.addClass('success').text('✓ <?php _e('Cache cleared!', 'multi-level-category-menu'); ?>');
+                                setTimeout(function() { location.reload(); }, 1000);
+                            } else {
+                                $status.addClass('error').text('✗ <?php _e('Error', 'multi-level-category-menu'); ?>');
+                            }
+                        },
+                        error: function() {
+                            $btn.prop('disabled', false).text('<?php _e('Clear Cache', 'multi-level-category-menu'); ?>');
+                            $status.addClass('error').text('✗ AJAX <?php _e('Error', 'multi-level-category-menu'); ?>');
+                        }
+                    });
                 });
             });
         </script>
@@ -434,41 +611,26 @@ if (class_exists('WooCommerce')) {
     $mlcm = new MLCMCacheManager();
 }
 
-function mlcm_enqueue_frontend_script() {
-    if (!class_exists('WooCommerce')) return;
-    
-    wp_enqueue_script(
-        'mlcm-frontend',
-        MLCM_PLUGIN_URL . 'assets/js/frontend.js',
-        ['jquery'],
-        MLCM_VERSION,
-        true
-    );
+// AJAX handler for cache clearing
+function mlcm_clear_cache_ajax() {
+    check_ajax_referer('mlcm_nonce');
 
-    wp_localize_script('mlcm-frontend', 'mlcm_config', [
-        'cache_url' => WP_CONTENT_URL . '/uploads/mlcm-menu-cache/',
-        'version' => MLCM_VERSION
-    ]);
-}
-add_action('wp_enqueue_scripts', 'mlcm_enqueue_frontend_script');
-
-function mlcm_enqueue_admin_script() {
-    if (!isset($_GET['page']) || 'mlcm-settings' !== $_GET['page']) {
-        return;
+    if (!current_user_can('manage_options')) {
+        wp_send_json_error(__('Insufficient permissions', 'multi-level-category-menu'));
     }
 
-    wp_enqueue_script(
-        'mlcm-admin',
-        MLCM_PLUGIN_URL . 'assets/js/admin.js',
-        ['jquery'],
-        MLCM_VERSION,
-        true
-    );
+    $cache_dir = MLCM_CACHE_DIR;
+    if (is_dir($cache_dir)) {
+        $files = glob($cache_dir . '/{*.js,*.js.gz,*.meta}', GLOB_BRACE);
+        foreach ($files as $file) {
+            if (is_file($file)) {
+                unlink($file);
+            }
+        }
+    }
 
-    wp_localize_script('mlcm-admin', 'mlcm_admin', [
-        'nonce' => wp_create_nonce('mlcm_nonce'),
-        'ajax_url' => admin_url('admin-ajax.php')
-    ]);
+    wp_cache_flush();
+    wp_send_json_success(['message' => __('Cache cleared successfully', 'multi-level-category-menu')]);
 }
-add_action('admin_enqueue_scripts', 'mlcm_enqueue_admin_script');
+add_action('wp_ajax_mlcm_clear_cache', 'mlcm_clear_cache_ajax');
 ?>
