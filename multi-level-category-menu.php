@@ -2,7 +2,7 @@
 /*
 Plugin Name: Multi-Level Category Menu
 Description: Creates customizable category menus with 5-level depth
-Version: 3.6.1-js
+Version: 3.7.0
 Author: Name
 Text Domain: mlcm
 */
@@ -283,12 +283,12 @@ class Multi_Level_Category_Menu {
             
             return [
                 'success' => true,
-                'message' => __('Меню успешно сгенерировано! Кэш файлы созданы в формате JavaScript.', 'mlcm')
+                'message' => __('✓ Меню успешно сгенерировано! Категории сохранены в JS-файлах.', 'mlcm')
             ];
         } catch (Exception $e) {
             return [
                 'success' => false,
-                'message' => __('Ошибка при генерировании меню: ', 'mlcm') . $e->getMessage()
+                'message' => __('✗ Ошибка при генерировании меню: ', 'mlcm') . $e->getMessage()
             ];
         }
     }
@@ -309,6 +309,21 @@ class Multi_Level_Category_Menu {
         if (file_put_contents($filepath, $js_content) === false) {
             throw new Exception("Failed to write file: {$filepath}");
         }
+    }
+
+    /**
+     * Get list of generated cache files
+     */
+    private function get_cache_files() {
+        $files = glob($this->cache_dir . '/*.js');
+        return is_array($files) ? $files : [];
+    }
+
+    /**
+     * Check if cache files exist
+     */
+    public function has_cache_files() {
+        return !empty($this->get_cache_files());
     }
 
     /**
@@ -348,6 +363,30 @@ class Multi_Level_Category_Menu {
     }
 
     /**
+     * Clear all cache files
+     */
+    private function clear_all_cache() {
+        $files = $this->get_cache_files();
+        $deleted_count = 0;
+        
+        if (!empty($files)) {
+            foreach ($files as $file) {
+                if (is_file($file) && @unlink($file)) {
+                    $deleted_count++;
+                }
+            }
+        }
+        
+        // Also try to remove .htaccess
+        $htaccess = $this->cache_dir . '/.htaccess';
+        if (file_exists($htaccess)) {
+            @unlink($htaccess);
+        }
+        
+        return $deleted_count;
+    }
+
+    /**
      * AJAX handler for menu generation
      */
     public function ajax_generate_menu() {
@@ -383,17 +422,13 @@ class Multi_Level_Category_Menu {
             wp_die();
         }
         
-        $files = glob($this->cache_dir . '/*.js');
-        if ($files) {
-            foreach ($files as $file) {
-                if (is_file($file)) {
-                    @unlink($file);
-                }
-            }
-        }
+        $deleted = $this->clear_all_cache();
         
         wp_send_json_success([
-            'message' => __('Кэш успешно удален!', 'mlcm')
+            'message' => sprintf(
+                __('✓ Кэш успешно удален! Удалено файлов: %d', 'mlcm'),
+                $deleted
+            )
         ]);
         wp_die();
     }
@@ -594,15 +629,24 @@ class Multi_Level_Category_Menu {
         }
 
         add_settings_field('mlcm_generation', 'Cache Management', function() {
+            $has_cache = $this->has_cache_files();
             echo '<div style="margin-bottom: 15px;">';
             echo '<button type="button" class="button button-primary" id="mlcm-generate-menu">';
             echo __('Generate Menu Cache (JS)', 'mlcm');
             echo '</button>';
-            echo ' <button type="button" class="button button-secondary" id="mlcm-clear-cache" style="margin-left: 10px;">';
-            echo __('Clear Cache', 'mlcm');
+            echo ' <button type="button" class="button button-secondary" id="mlcm-clear-cache" style="margin-left: 10px;"' . (!$has_cache ? ' disabled' : '') . '>';
+            echo __('Delete Cache', 'mlcm');
             echo '</button>';
             echo '<span class="spinner" style="float:none; margin-left:10px;"></span>';
             echo '</div>';
+            
+            if ($has_cache) {
+                $files = $this->get_cache_files();
+                echo '<p style="color: #28a745; margin: 10px 0;"><strong>✓ Кэш сгенерирован (' . count($files) . ' файлов)</strong></p>';
+            } else {
+                echo '<p style="color: #6c757d; margin: 10px 0;">Кэш не сгенерирован. Нажмите кнопку выше для создания.</p>';
+            }
+            
             echo '<div id="mlcm-generation-status" style="margin-top:15px;"></div>';
         }, 'mlcm_options', 'mlcm_main');
         
@@ -629,14 +673,14 @@ class Multi_Level_Category_Menu {
             'mlcm-frontend', 
             plugins_url('assets/css/frontend.css', __FILE__),
             [],
-            '3.6.1'
+            '3.7.0'
         );
         
         wp_enqueue_script(
             'mlcm-frontend', 
             plugins_url('assets/js/frontend.js', __FILE__), 
             ['jquery'], 
-            '3.6.1',
+            '3.7.0',
             true
         );
         
@@ -713,7 +757,7 @@ class Multi_Level_Category_Menu {
         $options = $this->get_options();
         $block_editor_file = plugin_dir_path(__FILE__) . 'assets/js/block-editor.js';
         
-        $version = file_exists($block_editor_file) ? filemtime($block_editor_file) : '3.6.1';
+        $version = file_exists($block_editor_file) ? filemtime($block_editor_file) : '3.7.0';
         
         wp_enqueue_script(
             'mlcm-block-editor',
