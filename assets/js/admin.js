@@ -1,41 +1,54 @@
 jQuery(function($) {
-    $('#mlcm-clear-cache').on('click', function(e) {
+    const $genBtn = $('#mlcm-generate-menu');
+    const $spinner = $genBtn.next('.spinner');
+    const $status = $('#mlcm-generation-status');
+    
+    if (!$genBtn.length) return;
+    
+    $genBtn.on('click', function(e) {
         e.preventDefault();
-        const $button = $(this);
-        const originalText = $button.text();
-        const $spinner = $button.next('.spinner');
-
-        $button.prop('disabled', true);
-        $spinner.css('visibility', 'visible');
-
+        
+        $spinner.addClass('is-active');
+        $genBtn.prop('disabled', true);
+        $status.html('<div class="notice notice-info"><p>' + mlcmAdmin.i18n.generating + '</p></div>');
+        
         $.ajax({
             url: mlcmAdmin.ajax_url,
             method: 'POST',
             data: {
-                action: 'mlcm_clear_all_caches',
+                action: 'mlcm_generate_menu',
                 security: mlcmAdmin.nonce
             },
-            success: (response) => {
-                const messageType = response.success ? 'success' : 'error';
-                addAdminNotice(response.data.message, messageType);
+            success: function(response) {
+                $spinner.removeClass('is-active');
+                $genBtn.prop('disabled', false);
+                
+                if (response.success || response.data.success) {
+                    const message = response.data.message || mlcmAdmin.i18n.menu_generated;
+                    $status.html('<div class="notice notice-success is-dismissible"><p>' + message + '</p></div>');
+                    
+                    // Auto-dismiss after 5 seconds
+                    setTimeout(() => {
+                        $status.fadeOut('fast', function() {
+                            $(this).html('');
+                            $(this).show();
+                        });
+                    }, 5000);
+                } else {
+                    const error = response.data.message || mlcmAdmin.i18n.error;
+                    $status.html('<div class="notice notice-error is-dismissible"><p>' + error + '</p></div>');
+                }
             },
-            error: (xhr) => {
-                addAdminNotice(mlcmAdmin.i18n.error + ': ' + xhr.statusText, 'error');
-            },
-            complete: () => {
-                $button.prop('disabled', false);
-                $spinner.css('visibility', 'hidden');
+            error: function(xhr, status, error) {
+                $spinner.removeClass('is-active');
+                $genBtn.prop('disabled', false);
+                $status.html('<div class="notice notice-error is-dismissible"><p>' + mlcmAdmin.i18n.error + ': ' + error + '</p></div>');
             }
         });
     });
-
-    function addAdminNotice(message, type = 'success') {
-        const notice = $(`
-            <div class="notice notice-${type} is-dismissible">
-                <p>${message}</p>
-            </div>
-        `);
-        $('.wrap h1').after(notice);
-        setTimeout(() => notice.fadeOut(), 5000);
-    }
+    
+    // Handle notice dismissal
+    $(document).on('click', '.notice-dismiss', function() {
+        $(this).closest('.notice').fadeOut('fast');
+    });
 });
