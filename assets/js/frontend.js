@@ -1,99 +1,107 @@
 /**
- * Get nonce from cache or fetch fresh one
- * Priority: sessionStorage > window.mlcmNonce > fetch from server
+ * Load level data from static JSON or AJAX fallback
  */
-function getMlcmNonce(callback) {
-    // If nonce is already in cache, return it
-    const stored = sessionStorage.getItem('mlcm_nonce');
-    if (stored) {
-        window.mlcmNonce = stored;
-        if (typeof callback === 'function') {
-            callback(stored);
-        }
-        return stored;
+function loadLevelData(level, parentId = null, callback) {
+    const useStatic = typeof mlcmVars !== 'undefined' && mlcmVars.use_static === '1';
+    
+    if (!useStatic) {
+        // Fallback to AJAX
+        loadLevelDataAjax(level, parentId, callback);
+        return;
     }
     
-    // If exists in window variable
-    if (typeof window.mlcmNonce !== 'undefined' && window.mlcmNonce) {
-        if (typeof callback === 'function') {
-            callback(window.mlcmNonce);
-        }
-        return window.mlcmNonce;
+    // Try to load static JSON first
+    let jsonUrl;
+    if (level === 1) {
+        jsonUrl = mlcmVars.static_url + '/level-1.json?v=' + Math.random();
+    } else if (level > 1 && level <= 5) {
+        jsonUrl = mlcmVars.static_url + '/level-' + level + '.json?v=' + Math.random();
+    } else {
+        callback(null);
+        return;
     }
     
-    // Otherwise fetch from server
-    fetchFreshNonce(callback);
-    return null;
+    // Fetch static JSON with gzip support
+    fetch(jsonUrl, {
+        method: 'GET',
+        headers: {
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Accept': 'application/json'
+        },
+        cache: 'default'
+    })
+    .then(response => {
+        if (!response.ok) {
+            throw new Error('Failed to load JSON: ' + response.statusText);
+        }
+        return response.json();
+    })
+    .then(data => {
+        callback(data);
+    })
+    .catch(error => {
+        console.warn('MLCM: Failed to load static JSON, falling back to AJAX:', error);
+        loadLevelDataAjax(level, parentId, callback);
+    });
 }
 
-    /**
-     * Fetch fresh nonce from server
-     * Compatible with cached pages - always fetches fresh nonce
-     */
-    function fetchFreshNonce(callback) {
-        if (typeof mlcmVars === 'undefined' || !mlcmVars.ajax_url) {
-            console.error('MLCM: mlcmVars not defined');
-            if (typeof callback === 'function') {
-                callback('');
+/**
+ * Fallback AJAX method for getting level data
+ */
+function loadLevelDataAjax(level, parentId, callback) {
+    if (typeof mlcmVars === 'undefined' || !mlcmVars.ajax_url) {
+        console.error('MLCM: mlcmVars not defined');
+        callback(null);
+        return;
+    }
+    
+    jQuery.ajax({
+        url: mlcmVars.ajax_url,
+        method: 'POST',
+        cache: false,
+        data: {
+            action: 'mlcm_get_subcategories',
+            parent_id: parentId || 0,
+            _t: new Date().getTime()
+        },
+        success: (response) => {
+            if (response.success && response.data) {
+                callback(response.data);
+            } else {
+                console.error('MLCM: AJAX response error', response);
+                callback(null);
             }
-            return;
+        },
+        error: (xhr, status, error) => {
+            console.error('MLCM: AJAX error', error);
+            callback(null);
         }
-        
-        // Add timestamp to prevent request caching
-        const timestamp = new Date().getTime();
-        
-        jQuery.ajax({
-            url: mlcmVars.ajax_url,
-            method: 'POST',
-            cache: false, // Explicitly disable caching
-            data: {
-                action: 'mlcm_get_nonce',
-                _t: timestamp // Timestamp to prevent caching
-            },
-            success: (response) => {
-                if (response.success && response.data && response.data.nonce) {
-                    const nonce = response.data.nonce;
-                    sessionStorage.setItem('mlcm_nonce', nonce);
-                    window.mlcmNonce = nonce;
-                    if (typeof callback === 'function') {
-                        callback(nonce);
-                    }
-                } else {
-                    console.error('MLCM: Failed to get nonce', response);
-                    if (typeof callback === 'function') {
-                        callback('');
-                    }
-                }
-            },
-            error: (xhr, status, error) => {
-                console.error('MLCM: Error fetching nonce', error);
-                if (typeof callback === 'function') {
-                    callback('');
-                }
+    });
+}
+
+jQuery(function($) {
+    const $container = $('.mlcm-container');
+    if (!$container.length) return;
+
+    const useStatic = $container.data('use-static') === 1 || $container.data('use-static') === '1';
+    const maxLevels = parseInt($container.data('levels')) || 3;
+    
+    // Load level 1 data immediately on page load
+    if (useStatic) {
+        loadLevelData(1, 0, function(data) {
+            if (data && Array.isArray(data)) {
+                populateLevel(1, data);
             }
         });
     }
 
-jQuery(function($) {
-    const $container = $('.mlcm-container');
-    if (!$container.length) return; // Early exit
-
-    // Check if page is cached
-    const isCached = $container.data('cached') === 1 || $container.data('cached') === '1';
-    
-    // For cached pages, get nonce in advance
-    // For non-cached pages, get it on first use
-    if (isCached) {
-        getMlcmNonce(); // Preload nonce for cached pages
-    }
-
-    // Remove duplicate buttons (optimized)
+    // Remove duplicate buttons
     const $buttons = $container.find('.mlcm-go-button');
     if ($buttons.length > 1) {
         $buttons.not(':first').remove();
     }
 
-    // Applying dynamic styles (only if needed)
+    // Applying dynamic styles
     const gap = parseInt($container.css('gap'));
     const fontSize = $container.css('font-size');
     if (gap) $container[0].style.setProperty('--mlcm-gap', `${gap}px`);
@@ -103,18 +111,16 @@ jQuery(function($) {
     let changeTimeout;
     $container.on('change', '.mlcm-select', function() {
         const $select = $(this);
-        const level = $select.data('level');
-        const $selectedOption = $select.find('option:selected');
-        const parentId = $selectedOption.val();
+        const level = parseInt($select.data('level'));
+        const parentId = parseInt($select.val());
         
         clearTimeout(changeTimeout);
         
-        if (parentId === '-1') {
+        if (parentId === -1) {
             resetLevels(level);
             return;
         }
         
-        // Small delay to prevent multiple requests
         changeTimeout = setTimeout(() => {
             loadSubcategories($select, level, parentId);
         }, 150);
@@ -128,96 +134,90 @@ jQuery(function($) {
         $container.find('.mlcm-select').each(function() {
             const $sel = $(this);
             if ($sel.data('level') > currentLevel) {
-                $sel.val('-1').prop('disabled', true);
+                $sel.val('-1').prop('disabled', true).html(`<option value="-1">${mlcmVars.labels[$sel.data('level') - 1]}</option>`);
             }
         });
     }
 
-    // Show loading indicator
-    function showLoading($select) {
-        const $nextSelect = $select.next('.mlcm-level').find('.mlcm-select');
-        if ($nextSelect.length) {
-            $nextSelect.prop('disabled', true)
-                .html('<option value="-1">Loading...</option>');
+    // Populate level with data
+    function populateLevel(level, categories) {
+        const $select = $(`.mlcm-select[data-level="${level}"]`);
+        if (!$select.length) return;
+        
+        const label = mlcmVars.labels[level - 1];
+        let options = `<option value="-1">${label}</option>`;
+        
+        if (Array.isArray(categories)) {
+            options += categories.map(cat => {
+                const id = cat.id || cat.term_id || '';
+                const name = cat.name || '';
+                const slug = cat.slug || '';
+                const url = cat.url || '';
+                return `<option value="${id}" data-slug="${slug}" data-url="${url}">${name}</option>`;
+            }).join('');
+        } else if (typeof categories === 'object') {
+            // Handle object format (indexed by parent_id for level 2+)
+            const firstLevel = Object.values(categories)[0];
+            if (Array.isArray(firstLevel)) {
+                options += firstLevel.map(cat => {
+                    const id = cat.id || cat.term_id || '';
+                    const name = cat.name || '';
+                    const slug = cat.slug || '';
+                    const url = cat.url || '';
+                    return `<option value="${id}" data-slug="${slug}" data-url="${url}">${name}</option>`;
+                }).join('');
+            }
         }
+        
+        $select.prop('disabled', false).html(options);
     }
 
-    // Hide loading indicator
-    function hideLoading() {
-        // Already handled in updateNextLevel
+    // Extract subcategories for specific parent from level data
+    function getSubcategoriesForParent(levelData, parentId) {
+        if (Array.isArray(levelData)) {
+            // Level 1 - flat array
+            return levelData;
+        } else if (typeof levelData === 'object' && levelData[parentId]) {
+            // Level 2+ - indexed by parent_id
+            return levelData[parentId];
+        }
+        return null;
     }
 
-    // Loading subcategories (optimized)
-    function loadSubcategories($select, level, parentId, retryCount = 0) {
-        const maxLevels = $container.data('levels');
+    // Loading subcategories
+    function loadSubcategories($select, level, parentId) {
         if (level >= maxLevels) {
             redirectToCategory();
             return;
         }
 
         // Show loading indicator
-        showLoading($select);
+        const nextLevel = level + 1;
+        const $nextSelect = $(`.mlcm-select[data-level="${nextLevel}"]`);
+        if ($nextSelect.length) {
+            $nextSelect.prop('disabled', true).html(`<option value="-1">Loading...</option>`);
+        }
 
-        // Get nonce asynchronously
-        getMlcmNonce(function(currentNonce) {
-            if (!currentNonce) {
-                console.error('MLCM: Could not get nonce');
-                hideLoading();
+        // Load next level data
+        loadLevelData(nextLevel, parentId, function(data) {
+            if (!data) {
+                console.error('MLCM: Failed to load level data');
+                redirectToCategory();
                 return;
             }
-
-            $.ajax({
-                url: mlcmVars.ajax_url,
-                method: 'POST',
-                cache: false, // Explicitly disable caching AJAX запросов
-                data: {
-                    action: 'mlcm_get_subcategories',
-                    parent_id: parentId,
-                    security: currentNonce,
-                    _t: new Date().getTime() // Timestamp to prevent caching
-                },
-                beforeSend: () => {
-                    $select.nextAll('.mlcm-select').val('-1').prop('disabled', true);
-                },
-                success: (response) => {
-                    // Check nonce error and retry request
-                    if (!response.success && response.data && response.data.code === 'invalid_nonce' && response.data.retry) {
-                        if (retryCount < 2) {
-                            // Clear nonce cache and get new one
-                            sessionStorage.removeItem('mlcm_nonce');
-                            delete window.mlcmNonce;
-                            
-                            // Retry request with new nonce
-                            setTimeout(function() {
-                                loadSubcategories($select, level, parentId, retryCount + 1);
-                            }, 100);
-                            return;
-                        } else {
-                            console.error('MLCM: Failed to get valid nonce after retries');
-                            hideLoading();
-                            return;
-                        }
-                    }
-                    
-                    // Handle successful response
-                    if (response.success && response.data && Object.keys(response.data).length > 0) {
-                        updateNextLevel($select, level, response.data);
-                    } else {
-                        // If no subcategories, redirect
-                        hideLoading();
-                        redirectToCategory();
-                    }
-                },
-                error: (xhr, status, error) => {
-                    console.error('MLCM: Failed to load subcategories', error);
-                    hideLoading();
-                }
-            });
+            
+            const subcats = getSubcategoriesForParent(data, parentId);
+            if (subcats && (Array.isArray(subcats) && subcats.length > 0 || typeof subcats === 'object')) {
+                updateNextLevel($select, level, subcats);
+                // Reset levels after next level
+                resetLevels(nextLevel);
+            } else {
+                redirectToCategory();
+            }
         });
     }
 
-    // Next level update (optimized)
-    // Data comes as array of objects, already sorted on server
+    // Next level update
     function updateNextLevel($select, currentLevel, categories) {
         const nextLevel = currentLevel + 1;
         const $nextSelect = $(`.mlcm-select[data-level="${nextLevel}"]`);
@@ -228,26 +228,20 @@ jQuery(function($) {
         const selectId = $nextSelect.attr('id');
         const labelId = `mlcm-label-level-${nextLevel}`;
         
-        // Ensure label exists for accessibility
+        // Ensure label exists
         let $label = $(`#${labelId}`);
         if (!$label.length) {
-            // Create label if it doesn't exist
             $label = $(`<label for="${selectId}" id="${labelId}" class="mlcm-screen-reader-text">${label}</label>`);
             $nextSelect.before($label);
         } else {
-            // Update existing label text
             $label.text(label);
         }
         
-        // Update aria-labelledby attribute
         $nextSelect.attr('aria-labelledby', labelId);
         
-        // Data now comes as array of objects [{id, name, slug, url}, ...]
-        // This ensures order preservation from server
         let options = '';
         
         if (Array.isArray(categories)) {
-            // If it's an array - use directly (new format)
             options = categories.map(item => {
                 const id = item.id || item.term_id || '';
                 const name = item.name || '';
@@ -256,8 +250,6 @@ jQuery(function($) {
                 return `<option value="${id}" data-slug="${slug}" data-url="${url}">${name}</option>`;
             }).join('');
         } else if (typeof categories === 'object' && categories !== null) {
-            // Backward compatibility: if object received (old format)
-            // Sort by name before displaying
             const entries = Object.entries(categories);
             entries.sort((a, b) => {
                 const nameA = (a[1].name || '').toUpperCase();
@@ -282,8 +274,7 @@ jQuery(function($) {
         
         if ($lastSelect.length) {
             const url = $lastSelect.find('option:selected').data('url');
-            // Validate URL before redirect
-            if (url && url.startsWith('http')) {
+            if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
                 window.location.href = url;
             }
         }
