@@ -117,7 +117,7 @@ class Multi_Level_Category_Menu {
         if (!empty($options['button_bg_color']) && preg_match('/^#[a-fA-F0-9]{6}$/', $options['button_bg_color'])) {
             $css[] = ".mlcm-go-button{background:{$options['button_bg_color']}}";
         }
-        if (!empty($options['button_font_size']) && is_numeric($options['button_button_font_size'])) {
+        if (!empty($options['button_font_size']) && is_numeric($options['button_font_size'])) {
             $css[] = ".mlcm-go-button{font-size:{$options['button_font_size']}rem}";
         }
         if (!empty($options['button_hover_bg_color']) && preg_match('/^#[a-fA-F0-9]{6}$/', $options['button_hover_bg_color'])) {
