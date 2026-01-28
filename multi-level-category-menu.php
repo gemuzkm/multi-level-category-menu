@@ -24,8 +24,9 @@ class Multi_Level_Category_Menu {
     }
 
     public function __construct() {
-        $this->cache_dir = wp_upload_dir()['basedir'] . '/mlcm-menu-cache';
-        $this->cache_url = wp_upload_dir()['baseurl'] . '/mlcm-menu-cache';
+        $uploads = wp_upload_dir();
+        $this->cache_dir = $uploads['basedir'] . '/mlcm-menu-cache';
+        $this->cache_url = $uploads['baseurl'] . '/mlcm-menu-cache';
         
         add_shortcode('mlcm_menu', [$this, 'shortcode_handler']);
         add_action('widgets_init', [$this, 'register_widget']);
@@ -689,25 +690,36 @@ class Multi_Level_Category_Menu {
         }
     }
 
+    /**
+     * Enqueue frontend CSS/JS (prefers minified assets when available)
+     */
     public function enqueue_frontend_assets() {
         if (!$this->has_menu_on_page()) {
             return;
         }
         
         $options = $this->get_options();
+
+        // Prefer minified CSS if it exists
+        $frontend_css_path = plugin_dir_path(__FILE__) . 'assets/css/frontend.min.css';
+        $frontend_css_file = file_exists($frontend_css_path) ? 'assets/css/frontend.min.css' : 'assets/css/frontend.css';
         
         wp_enqueue_style(
-            'mlcm-frontend', 
-            plugins_url('assets/css/frontend.css', __FILE__),
+            'mlcm-frontend',
+            plugins_url($frontend_css_file, __FILE__),
             [],
-            '3.6.0'
+            file_exists($frontend_css_path) ? filemtime($frontend_css_path) : '3.6.0'
         );
         
+        // Prefer minified JS if it exists
+        $frontend_js_path = plugin_dir_path(__FILE__) . 'assets/js/frontend.min.js';
+        $frontend_js_file = file_exists($frontend_js_path) ? 'assets/js/frontend.min.js' : 'assets/js/frontend.js';
+
         wp_enqueue_script(
-            'mlcm-frontend', 
-            plugins_url('assets/js/frontend.js', __FILE__), 
-            ['jquery'], 
-            '3.6.0',
+            'mlcm-frontend',
+            plugins_url($frontend_js_file, __FILE__),
+            ['jquery'],
+            file_exists($frontend_js_path) ? filemtime($frontend_js_path) : '3.6.0',
             true
         );
         
@@ -743,12 +755,11 @@ class Multi_Level_Category_Menu {
             return true;
         }
         
-        if ($post && has_blocks($post->post_content)) {
-            if (has_block('mlcm/menu-block', $post->post_content)) {
-                return true;
-            }
+        if ($post && has_blocks($post->post_content) && has_block('mlcm/menu-block', $post->post_content)) {
+            return true;
         }
-        
+
+        // No menu-related shortcode, widget, or block detected on this page
         return true;
     }
 
@@ -784,17 +795,35 @@ class Multi_Level_Category_Menu {
         register_widget('MLCM_Widget');
     }
 
+    /**
+     * Enqueue block editor assets (prefers minified JS/CSS when available)
+     */
     public function enqueue_block_editor_assets() {
         $options = $this->get_options();
-        $block_editor_file = plugin_dir_path(__FILE__) . 'assets/js/block-editor.js';
-        
-        $version = file_exists($block_editor_file) ? filemtime($block_editor_file) : '3.6.0';
-        
+
+        // Determine best JS asset (minified if present)
+        $block_editor_js_path = plugin_dir_path(__FILE__) . 'assets/js/block-editor.min.js';
+        $block_editor_js_file = file_exists($block_editor_js_path) ? 'assets/js/block-editor.min.js' : 'assets/js/block-editor.js';
+        $block_editor_version = file_exists($block_editor_js_path)
+            ? filemtime($block_editor_js_path)
+            : (file_exists(plugin_dir_path(__FILE__) . 'assets/js/block-editor.js') ? filemtime(plugin_dir_path(__FILE__) . 'assets/js/block-editor.js') : '3.6.0');
+
         wp_enqueue_script(
             'mlcm-block-editor',
-            plugins_url('assets/js/block-editor.js', __FILE__),
+            plugins_url($block_editor_js_file, __FILE__),
             ['wp-blocks', 'wp-i18n', 'wp-element', 'wp-components', 'wp-editor'],
-            $version
+            $block_editor_version
+        );
+
+        // Enqueue block editor CSS (minified if present)
+        $block_editor_css_path = plugin_dir_path(__FILE__) . 'assets/css/block-editor.min.css';
+        $block_editor_css_file = file_exists($block_editor_css_path) ? 'assets/css/block-editor.min.css' : 'assets/css/block-editor.css';
+
+        wp_enqueue_style(
+            'mlcm-block-editor',
+            plugins_url($block_editor_css_file, __FILE__),
+            [],
+            file_exists($block_editor_css_path) ? filemtime($block_editor_css_path) : '3.6.0'
         );
 
         wp_localize_script('mlcm-block-editor', 'mlcmBlockVars', [
@@ -803,14 +832,34 @@ class Multi_Level_Category_Menu {
         ]);
     }
 
+    /**
+     * Enqueue admin assets (prefers minified CSS/JS when available)
+     */
     public function enqueue_admin_assets($hook) {
         if ($hook === 'settings_page_mlcm-settings') {
-            wp_enqueue_style('mlcm-admin', plugins_url('assets/css/admin.css', __FILE__));
+            // Admin CSS
+            $admin_css_path = plugin_dir_path(__FILE__) . 'assets/css/admin.min.css';
+            $admin_css_file = file_exists($admin_css_path) ? 'assets/css/admin.min.css' : 'assets/css/admin.css';
+
+            wp_enqueue_style(
+                'mlcm-admin',
+                plugins_url($admin_css_file, __FILE__),
+                [],
+                file_exists($admin_css_path) ? filemtime($admin_css_path) : '3.6.0'
+            );
+
+            // Admin JS
+            $admin_js_path = plugin_dir_path(__FILE__) . 'assets/js/admin.min.js';
+            $admin_js_file = file_exists($admin_js_path) ? 'assets/js/admin.min.js' : 'assets/js/admin.js';
+            $admin_js_version = file_exists($admin_js_path)
+                ? filemtime($admin_js_path)
+                : (file_exists(plugin_dir_path(__FILE__) . 'assets/js/admin.js') ? filemtime(plugin_dir_path(__FILE__) . 'assets/js/admin.js') : '3.6.0');
+
             wp_enqueue_script(
-                'mlcm-admin', 
-                plugins_url('assets/js/admin.js', __FILE__), 
-                ['jquery'], 
-                filemtime(plugin_dir_path(__FILE__) . 'assets/js/admin.js'),
+                'mlcm-admin',
+                plugins_url($admin_js_file, __FILE__),
+                ['jquery'],
+                $admin_js_version,
                 true
             );
 
