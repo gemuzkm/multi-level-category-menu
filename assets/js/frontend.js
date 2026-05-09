@@ -1,362 +1,288 @@
 /**
- * Load level data from static JavaScript files or AJAX fallback
+ * MLCM Frontend — vanilla JS, no jQuery dependency
  */
-function loadLevelData(level, parentId = null, callback) {
-    const useStatic = typeof mlcmVars !== 'undefined' && mlcmVars.use_static === '1';
-    
-    if (!useStatic) {
-        // Fallback to AJAX
-        loadLevelDataAjax(level, parentId, callback);
-        return;
-    }
-    
-    // Try to load static JS file first
-    let jsUrl;
-    let varName;
-    if (level === 1) {
-        // Use file modification time for cache versioning (allows CF caching)
-        const version = (mlcmVars.file_versions && mlcmVars.file_versions[1]) ? mlcmVars.file_versions[1] : '';
-        jsUrl = mlcmVars.static_url + '/level-1.js' + (version ? '?v=' + version : '');
-        varName = 'mlcmLevel1';
-    } else if (level > 1 && level <= 5) {
-        // Use file modification time for cache versioning (allows CF caching)
-        const version = (mlcmVars.file_versions && mlcmVars.file_versions[level]) ? mlcmVars.file_versions[level] : '';
-        jsUrl = mlcmVars.static_url + '/level-' + level + '.js' + (version ? '?v=' + version : '');
-        varName = 'mlcmLevel' + level;
-    } else {
-        callback(null);
-        return;
-    }
-    
-    // Check if data is already loaded in window object
-    if (typeof window[varName] !== 'undefined') {
-        callback(window[varName]);
-        return;
-    }
-    
-    // Load JS file dynamically
-    const script = document.createElement('script');
-    script.src = jsUrl;
-    script.async = true;
-    
-    // Set up timeout
-    const timeout = setTimeout(() => {
-        script.onerror = null;
-        script.onload = null;
-        document.head.removeChild(script);
-        console.warn('MLCM: Timeout loading JS file, falling back to AJAX');
-        loadLevelDataAjax(level, parentId, callback);
-    }, 10000);
-    
-    script.onload = function() {
-        clearTimeout(timeout);
-        // Check if variable was set
-        if (typeof window[varName] !== 'undefined') {
-            const data = window[varName];
-            // Clean up the global variable to avoid memory leaks
-            delete window[varName];
-            callback(data);
-        } else {
-            console.warn('MLCM: JS file loaded but variable not found, falling back to AJAX');
-            loadLevelDataAjax(level, parentId, callback);
-        }
-        document.head.removeChild(script);
-    };
-    
-    script.onerror = function() {
-        clearTimeout(timeout);
-        console.warn('MLCM: Failed to load JS file, falling back to AJAX');
-        document.head.removeChild(script);
-        loadLevelDataAjax(level, parentId, callback);
-    };
-    
-    document.head.appendChild(script);
-}
+(function () {
+    'use strict';
 
-/**
- * Fallback AJAX method for getting level data
- */
-function loadLevelDataAjax(level, parentId, callback) {
-    if (typeof mlcmVars === 'undefined' || !mlcmVars.ajax_url) {
-        console.error('MLCM: mlcmVars not defined');
-        callback(null);
-        return;
-    }
-    
-    jQuery.ajax({
-        url: mlcmVars.ajax_url,
-        method: 'POST',
-        cache: false,
-        data: {
-            action: 'mlcm_get_subcategories',
-            parent_id: parentId || 0,
-            _t: new Date().getTime()
-        },
-        success: (response) => {
-            if (response.success && response.data) {
-                callback(response.data);
-            } else {
-                console.error('MLCM: AJAX response error', response);
-                callback(null);
-            }
-        },
-        error: (xhr, status, error) => {
-            console.error('MLCM: AJAX error', error);
-            callback(null);
-        }
-    });
-}
+    if (typeof mlcmVars === 'undefined') return;
 
-jQuery(function($) {
-    const $container = $('.mlcm-container');
-    if (!$container.length) return;
+    const vars       = mlcmVars;
+    const useStatic  = vars.use_static === '1';
+    const staticUrl  = vars.static_url || '';
+    const labels     = vars.labels || [];
+    const ajaxUrl    = vars.ajax_url || '';
 
-    const useStatic = $container.data('use-static') === 1 || $container.data('use-static') === '1';
-    const maxLevels = parseInt($container.data('levels')) || 3;
-    
-    // Load level 1 data immediately on page load
-    if (useStatic) {
-        loadLevelData(1, 0, function(data) {
-            if (data && Array.isArray(data)) {
-                populateLevel(1, data);
-            }
-        });
-    } else {
-        // If not using static files, ensure level 1 is populated from inline data
-        const $level1Select = $('.mlcm-select[data-level="1"]');
-        if ($level1Select.length && $level1Select.find('option').length <= 1) {
-            // Level 1 is empty, try to populate from inline data if available
-            const inlineData = $container.data('level-1-data');
-            if (inlineData && Array.isArray(inlineData)) {
-                populateLevel(1, inlineData);
-            }
-        }
+    /* ── utility ──────────────────────────────────────────── */
+
+    function qs(sel, ctx) { return (ctx || document).querySelector(sel); }
+    function qsa(sel, ctx) { return Array.from((ctx || document).querySelectorAll(sel)); }
+
+    function debounce(fn, ms) {
+        let t;
+        return function () {
+            clearTimeout(t);
+            t = setTimeout(() => fn.apply(this, arguments), ms);
+        };
     }
 
-    // Remove duplicate buttons
-    const $buttons = $container.find('.mlcm-go-button');
-    if ($buttons.length > 1) {
-        $buttons.not(':first').remove();
-    }
+    /* ── static JS file loader ────────────────────────────── */
 
-    // Applying dynamic styles
-    const gap = parseInt($container.css('gap'));
-    const fontSize = $container.css('font-size');
-    if (gap) $container[0].style.setProperty('--mlcm-gap', `${gap}px`);
-    if (fontSize) $container[0].style.setProperty('--mlcm-font-size', fontSize);
+    // Cache already-loaded level data so we never fetch twice
+    const levelCache = {};
 
-    // Debounce for select change handling
-    let changeTimeout;
-    $container.on('change', '.mlcm-select', function() {
-        const $select = $(this);
-        const level = parseInt($select.data('level'));
-        const parentId = parseInt($select.val());
-        
-        clearTimeout(changeTimeout);
-        
-        if (parentId === -1) {
-            resetLevels(level);
+    function loadLevelData(level, parentId, callback) {
+        if (!useStatic) {
+            loadLevelDataAjax(parentId, callback);
             return;
         }
-        
-        changeTimeout = setTimeout(() => {
-            loadSubcategories($select, level, parentId);
-        }, 150);
-    });
 
-    // Button click handler
-    $container.on('click', '.mlcm-go-button', redirectToCategory);
+        const maxLvl = parseInt(vars.max_levels) || 5;
+        if (level < 1 || level > maxLvl) { callback(null); return; }
 
-    // Reset the next levels
-    function resetLevels(currentLevel) {
-        $container.find('.mlcm-select').each(function() {
-            const $sel = $(this);
-            if ($sel.data('level') > currentLevel) {
-                $sel.val('-1').prop('disabled', true).html(`<option value="-1">${mlcmVars.labels[$sel.data('level') - 1]}</option>`);
+        const varName = 'mlcmLevel' + level;
+
+        // Already in memory cache
+        if (levelCache[level]) { callback(levelCache[level]); return; }
+
+        // Already on window (e.g. inline script)
+        if (typeof window[varName] !== 'undefined') {
+            levelCache[level] = window[varName];
+            delete window[varName];
+            callback(levelCache[level]);
+            return;
+        }
+
+        const ver = (vars.file_versions && vars.file_versions[level]) ? vars.file_versions[level] : '';
+        const url = staticUrl + '/level-' + level + '.js' + (ver ? '?v=' + ver : '');
+
+        const script = document.createElement('script');
+        script.src   = url;
+        script.async = true;
+
+        const timer = setTimeout(function () {
+            script.onload = script.onerror = null;
+            if (script.parentNode) script.parentNode.removeChild(script);
+            loadLevelDataAjax(parentId, callback);
+        }, 10000);
+
+        script.onload = function () {
+            clearTimeout(timer);
+            if (script.parentNode) script.parentNode.removeChild(script);
+            if (typeof window[varName] !== 'undefined') {
+                levelCache[level] = window[varName];
+                delete window[varName];
+                callback(levelCache[level]);
+            } else {
+                loadLevelDataAjax(parentId, callback);
             }
+        };
+
+        script.onerror = function () {
+            clearTimeout(timer);
+            if (script.parentNode) script.parentNode.removeChild(script);
+            loadLevelDataAjax(parentId, callback);
+        };
+
+        document.head.appendChild(script);
+    }
+
+    /* ── AJAX fallback (no jQuery) ────────────────────────── */
+
+    function loadLevelDataAjax(parentId, callback) {
+        if (!ajaxUrl) { callback(null); return; }
+
+        const body = new URLSearchParams({
+            action   : 'mlcm_get_subcategories',
+            parent_id: parentId || 0,
+            _t       : Date.now()
         });
+
+        fetch(ajaxUrl, {
+            method : 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body   : body.toString()
+        })
+        .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+        .then(function (resp) {
+            callback((resp.success && resp.data) ? resp.data : null);
+        })
+        .catch(function () { callback(null); });
     }
 
-    // Populate level with data
-    function populateLevel(level, categories) {
-        const $select = $(`.mlcm-select[data-level="${level}"]`);
-        if (!$select.length) return;
-        
-        const label = mlcmVars.labels[level - 1];
-        let options = `<option value="-1">${label}</option>`;
-        
+    /* ── DOM helpers ──────────────────────────────────────── */
+
+    function buildOptions(categories, label) {
+        let html = '<option value="-1">' + escHtml(label) + '</option>';
+
         if (Array.isArray(categories)) {
-            options += categories.map(cat => {
-                const id = cat.id || cat.term_id || '';
-                const name = cat.name || '';
-                const slug = cat.slug || '';
-                const url = cat.url || '';
-                return `<option value="${id}" data-slug="${slug}" data-url="${url}">${name}</option>`;
+            html += categories.map(function (cat) {
+                return optionTag(cat.id || cat.term_id || '', cat.name || '', cat.slug || '', cat.url || '');
             }).join('');
-        } else if (typeof categories === 'object') {
-            // Handle object format (indexed by parent_id for level 2+)
-            const firstLevel = Object.values(categories)[0];
-            if (Array.isArray(firstLevel)) {
-                options += firstLevel.map(cat => {
-                    const id = cat.id || cat.term_id || '';
-                    const name = cat.name || '';
-                    const slug = cat.slug || '';
-                    const url = cat.url || '';
-                    return `<option value="${id}" data-slug="${slug}" data-url="${url}">${name}</option>`;
-                }).join('');
-            }
+        } else if (categories && typeof categories === 'object') {
+            html += Object.values(categories).map(function (cat) {
+                return optionTag(cat.id || cat.term_id || '', cat.name || '', cat.slug || '', cat.url || '');
+            }).join('');
         }
-        
-        $select.prop('disabled', false).html(options);
+
+        return html;
     }
 
-    // Extract subcategories for specific parent from level data
-    function getSubcategoriesForParent(levelData, parentId) {
-        if (Array.isArray(levelData)) {
-            // Level 1 - flat array
-            return levelData;
-        } else if (typeof levelData === 'object' && levelData[parentId]) {
-            // Level 2+ - indexed by parent_id
-            return levelData[parentId];
-        }
+    function optionTag(id, name, slug, url) {
+        return '<option value="' + id + '" data-slug="' + escAttr(slug) + '" data-url="' + escAttr(url) + '">' + escHtml(name) + '</option>';
+    }
+
+    function escHtml(s) {
+        return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    function escAttr(s) { return escHtml(s); }
+
+    function getSubcatsForParent(data, parentId) {
+        if (Array.isArray(data)) return data;          // level 1 flat array
+        if (data && data[parentId]) return data[parentId]; // level 2+ keyed by parent
         return null;
     }
 
-    // Loading subcategories
-    function loadSubcategories($select, level, parentId) {
-        if (level >= maxLevels) {
-            redirectToCategory();
-            return;
+    /* ── core logic ───────────────────────────────────────── */
+
+    function init(container) {
+        const maxLevels = parseInt(container.dataset.levels) || 3;
+
+        // Populate level 1 on load
+        if (useStatic) {
+            loadLevelData(1, 0, function (data) {
+                if (data && Array.isArray(data)) populateSelect(container, 1, data);
+            });
         }
 
-        // Only show loading indicator if a valid parent is selected
-        if (!parentId || parentId <= 0) {
-            return;
-        }
+        // Remove duplicate Go buttons
+        var buttons = qsa('.mlcm-go-button', container);
+        buttons.slice(1).forEach(function (b) { b.parentNode.removeChild(b); });
 
-        // Show loading indicator
-        const nextLevel = level + 1;
-        const $nextSelect = $(`.mlcm-select[data-level="${nextLevel}"]`);
-        if ($nextSelect.length) {
-            const label = mlcmVars.labels[nextLevel - 1];
-            $nextSelect.addClass('mlcm-loading').prop('disabled', true).html(`<option value="-1">${label}</option>`);
-        }
+        // Change handler (delegated)
+        var debouncedChange = debounce(function (e) {
+            var select = e.target;
+            if (!select.classList.contains('mlcm-select')) return;
 
-        // Load next level data
-        loadLevelData(nextLevel, parentId, function(data) {
-            if (!data) {
-                console.error('MLCM: Failed to load level data');
-                const $nextSelect = $(`.mlcm-select[data-level="${nextLevel}"]`);
-                if ($nextSelect.length) {
-                    const label = mlcmVars.labels[nextLevel - 1];
-                    $nextSelect.removeClass('mlcm-loading').prop('disabled', false).html(`<option value="-1">${label}</option>`);
-                }
-                return;
+            var level    = parseInt(select.dataset.level);
+            var parentId = parseInt(select.value);
+
+            if (parentId === -1) { resetFrom(container, level); return; }
+
+            if (level >= maxLevels) { redirectToCategory(container); return; }
+
+            loadSubcategories(container, level, parentId, maxLevels);
+        }, 150);
+
+        container.addEventListener('change', debouncedChange);
+
+        // Go button
+        container.addEventListener('click', function (e) {
+            if (e.target.classList.contains('mlcm-go-button')) {
+                redirectToCategory(container);
             }
-            
-            const subcats = getSubcategoriesForParent(data, parentId);
-            // Check if we have valid subcategories (non-empty array)
-            const hasSubcategories = subcats && 
-                ((Array.isArray(subcats) && subcats.length > 0) || 
-                 (typeof subcats === 'object' && subcats !== null && Object.keys(subcats).length > 0));
-            
-            if (hasSubcategories) {
-                // Has subcategories, load them
-                updateNextLevel($select, level, subcats);
-                // Reset levels after next level
-                resetLevels(nextLevel);
-            } else {
-                // No subcategories - redirect to the selected category
-                const $nextSelect = $(`.mlcm-select[data-level="${nextLevel}"]`);
-                if ($nextSelect.length) {
-                    const label = mlcmVars.labels[nextLevel - 1];
-                    $nextSelect.removeClass('mlcm-loading').prop('disabled', true).html(`<option value="-1">${label}</option>`);
-                }
-                // Redirect to the currently selected category since it has no children
-                redirectToCategory();
+        });
+
+        // Mobile layout
+        handleMobileLayout(container);
+        window.addEventListener('resize', debounce(function () {
+            handleMobileLayout(container);
+        }, 100));
+    }
+
+    function populateSelect(container, level, categories) {
+        var select = qs('.mlcm-select[data-level="' + level + '"]', container);
+        if (!select) return;
+        var label = labels[level - 1] || 'Level ' + level;
+        select.disabled = false;
+        select.innerHTML = buildOptions(categories, label);
+    }
+
+    function resetFrom(container, fromLevel) {
+        qsa('.mlcm-select', container).forEach(function (sel) {
+            var lvl = parseInt(sel.dataset.level);
+            if (lvl > fromLevel) {
+                sel.disabled = true;
+                sel.value    = '-1';
+                sel.innerHTML = '<option value="-1">' + escHtml(labels[lvl - 1] || 'Level ' + lvl) + '</option>';
             }
         });
     }
 
-    // Next level update
-    function updateNextLevel($select, currentLevel, categories) {
-        const nextLevel = currentLevel + 1;
-        const $nextSelect = $(`.mlcm-select[data-level="${nextLevel}"]`);
-        
-        if (!$nextSelect.length) return;
-        
-        const label = mlcmVars.labels[nextLevel - 1];
-        const selectId = $nextSelect.attr('id');
-        const labelId = `mlcm-label-level-${nextLevel}`;
-        
-        // Ensure label exists
-        let $label = $(`#${labelId}`);
-        if (!$label.length) {
-            $label = $(`<label for="${selectId}" id="${labelId}" class="mlcm-screen-reader-text">${label}</label>`);
-            $nextSelect.before($label);
-        } else {
-            $label.text(label);
-        }
-        
-        $nextSelect.attr('aria-labelledby', labelId);
-        
-        let options = '';
-        
-        if (Array.isArray(categories)) {
-            options = categories.map(item => {
-                const id = item.id || item.term_id || '';
-                const name = item.name || '';
-                const slug = item.slug || '';
-                const url = item.url || '';
-                return `<option value="${id}" data-slug="${slug}" data-url="${url}">${name}</option>`;
-            }).join('');
-        } else if (typeof categories === 'object' && categories !== null) {
-            const entries = Object.entries(categories);
-            entries.sort((a, b) => {
-                const nameA = (a[1].name || '').toUpperCase();
-                const nameB = (b[1].name || '').toUpperCase();
-                return nameA.localeCompare(nameB);
-            });
-            
-            options = entries.map(([id, data]) => 
-                `<option value="${id}" data-slug="${data.slug || ''}" data-url="${data.url || ''}">${data.name || ''}</option>`
-            ).join('');
-        }
-        
-        $nextSelect.removeClass('mlcm-loading').prop('disabled', false)
-            .html(`<option value="-1">${label}</option>${options}`);
-    }
+    function loadSubcategories(container, level, parentId, maxLevels) {
+        var nextLevel  = level + 1;
+        var nextSelect = qs('.mlcm-select[data-level="' + nextLevel + '"]', container);
 
-    // Redirect to category page
-    function redirectToCategory() {
-        const $lastSelect = $container.find('.mlcm-select')
-            .filter(function() { return $(this).val() !== '-1'; })
-            .last();
-        
-        if ($lastSelect.length) {
-            const url = $lastSelect.find('option:selected').data('url');
-            if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
-                window.location.href = url;
+        if (nextSelect) {
+            nextSelect.disabled  = true;
+            nextSelect.classList.add('mlcm-loading');
+            nextSelect.innerHTML = '<option value="-1">' + escHtml(labels[nextLevel - 1] || '') + '</option>';
+        }
+
+        loadLevelData(nextLevel, parentId, function (data) {
+            if (nextSelect) nextSelect.classList.remove('mlcm-loading');
+
+            if (!data) {
+                if (nextSelect) nextSelect.disabled = false;
+                return;
             }
+
+            var subcats = getSubcatsForParent(data, parentId);
+            var hasSub  = subcats && (Array.isArray(subcats) ? subcats.length > 0 : Object.keys(subcats).length > 0);
+
+            if (hasSub) {
+                populateSelect(container, nextLevel, subcats);
+                resetFrom(container, nextLevel);
+            } else {
+                if (nextSelect) {
+                    nextSelect.disabled  = true;
+                    nextSelect.innerHTML = '<option value="-1">' + escHtml(labels[nextLevel - 1] || '') + '</option>';
+                }
+                redirectToCategory(container);
+            }
+        });
+    }
+
+    function redirectToCategory(container) {
+        var selects = qsa('.mlcm-select', container);
+        var last    = null;
+
+        selects.forEach(function (sel) {
+            if (sel.value !== '-1') last = sel;
+        });
+
+        if (!last) return;
+        var selected = last.options[last.selectedIndex];
+        var url      = selected ? selected.dataset.url : '';
+
+        if (url && (url.indexOf('http://') === 0 || url.indexOf('https://') === 0)) {
+            window.location.href = url;
         }
     }
 
-    // Mobile layout (debounced)
-    const handleMobileLayout = (() => {
-        let timeout;
-        return () => {
-            clearTimeout(timeout);
-            timeout = setTimeout(() => {
-                if (window.matchMedia('(max-width: 768px)').matches) {
-                    $container.find('.mlcm-go-button').css({
-                        width: '100%',
-                        margin: '10px 0 0 0'
-                    });
-                }
-            }, 100);
-        };
-    })();
+    function handleMobileLayout(container) {
+        var btn = qs('.mlcm-go-button', container);
+        if (!btn) return;
+        if (window.matchMedia('(max-width: 768px)').matches) {
+            btn.style.width  = '100%';
+            btn.style.margin = '10px 0 0 0';
+        } else {
+            btn.style.width  = '';
+            btn.style.margin = '';
+        }
+    }
 
-    handleMobileLayout();
-    $(window).on('resize', handleMobileLayout);
-});
+    /* ── boot ─────────────────────────────────────────────── */
+
+    function boot() {
+        var containers = qsa('.mlcm-container');
+        containers.forEach(function (c) { init(c); });
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', boot);
+    } else {
+        boot();
+    }
+
+}());

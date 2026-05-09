@@ -1,0 +1,31 @@
+{
+  "$schema": "https://schemas.wp.org/trunk/block.json",
+  "apiVersion": 2,
+  "name": "mlcm/menu-block",
+  "version": "3.7.0",
+  "title": "Multi-Level Category Menu",
+  "category": "widgets",
+  "icon": "list-view",
+  "description": "Displays a multi-level category navigation menu with customisable depth and layout.",
+  "keywords": ["category", "menu", "navigation", "dropdown"],
+  "textdomain": "mlcm",
+  "editorScript": "file:./block-editor.js",
+  "editorStyle":  "file:../css/block-editor.css",
+  "attributes": {
+    "layout": {
+      "type": "string",
+      "default": "vertical",
+      "enum": ["vertical", "horizontal"]
+    },
+    "levels": {
+      "type": "number",
+      "default": 3,
+      "minimum": 1,
+      "maximum": 10
+    }
+  },
+  "supports": {
+    "html": false,
+    "align": ["wide", "full"]
+  }
+}
