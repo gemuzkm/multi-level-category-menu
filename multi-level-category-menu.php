@@ -2,7 +2,7 @@
 /*
 Plugin Name: Multi-Level Category Menu
 Description: Creates customizable category menus with configurable depth. Fully compatible with page caching plugins (FlyingPress, WP Rocket, Cloudflare, etc.) — no frontend nonce required.
-Version: 3.9.1
+Version: 3.9.2
 Author: gemuzkm
 Author URI: https://github.com/gemuzkm
 Text Domain: mlcm
@@ -42,9 +42,11 @@ class Multi_Level_Category_Menu {
         add_action('widgets_init',                [$this, 'register_widget']);
         add_action('init',                        [$this, 'register_gutenberg_block']);
 
-        // Use template_redirect instead of wp_enqueue_scripts so that
-        // $post is fully set up and has_shortcode() / has_block() work reliably.
-        add_action('template_redirect',           [$this, 'maybe_enqueue_frontend_assets']);
+        // Unconditionally enqueue frontend assets on public pages.
+        // The JS is idempotent: it only initializes when .mlcm-container exists,
+        // so loading it everywhere is safe and removes timing issues with
+        // shortcode/block detection (archives, widgets, ACF, page builders, etc.).
+        add_action('wp_enqueue_scripts',          [$this, 'enqueue_frontend_assets']);
 
         add_action('enqueue_block_editor_assets', [$this, 'enqueue_block_editor_assets']);
         add_action('admin_init',                  [$this, 'register_settings']);
@@ -169,7 +171,7 @@ class Multi_Level_Category_Menu {
             'mlcm-block-editor',
             plugins_url('assets/js/block-editor.js', __FILE__),
             ['wp-blocks', 'wp-i18n', 'wp-element', 'wp-components', 'wp-editor'],
-            file_exists($js_path) ? filemtime($js_path) : '3.9.1'
+            file_exists($js_path) ? filemtime($js_path) : '3.9.2'
         );
 
         register_block_type('mlcm/menu-block', [
@@ -431,43 +433,71 @@ class Multi_Level_Category_Menu {
     }
 
     /**
-     * Checks whether the current page uses the plugin's shortcode or block.
+     * Enqueue frontend CSS and JS.
      *
-     * Called from template_redirect, so the global $post and queried object
-     * are fully resolved. This fixes the race condition that occurred when
-     * the check ran inside wp_enqueue_scripts, where $post could still be
-     * null on non-singular pages (archives, widgets, etc.).
+     * Assets are loaded unconditionally on every public page. This is the
+     * only reliable way to support every rendering path (post content,
+     * widgets, page builders, ACF fields, archives, WooCommerce templates,
+     * etc.). The frontend JS is idempotent — it initializes only when a
+     * `.mlcm-container` element is present in the DOM, so loading it
+     * everywhere has negligible cost.
      */
-    private function page_uses_plugin() {
-        if (is_admin()) return false;
+    public function enqueue_frontend_assets() {
+        if (is_admin()) return;
 
-        // Check active widget sidebars for shortcode usage
-        if (is_active_widget(false, false, 'mlcm_widget', true)) {
-            return true;
+        $options         = $this->get_options();
+        $plugin_dir_url  = plugin_dir_url(__FILE__);
+        $plugin_dir_path = plugin_dir_path(__FILE__);
+
+        // CSS
+        $css_min = $plugin_dir_path . 'assets/css/frontend.min.css';
+        $css_reg = $plugin_dir_path . 'assets/css/frontend.css';
+        if (file_exists($css_min)) {
+            $css_file = $plugin_dir_url . 'assets/css/frontend.min.css';
+            $css_ver  = filemtime($css_min);
+        } elseif (file_exists($css_reg)) {
+            $css_file = $plugin_dir_url . 'assets/css/frontend.css';
+            $css_ver  = filemtime($css_reg);
+        } else {
+            $css_file = false;
+            $css_ver  = '3.9.2';
         }
 
-        global $post;
-        if (!($post instanceof WP_Post)) return false;
+        if ($css_file) {
+            wp_enqueue_style('mlcm-frontend', $css_file, [], $css_ver);
+        }
 
-        $content = $post->post_content;
+        // JS
+        $js_min = $plugin_dir_path . 'assets/js/frontend.min.js';
+        $js_reg = $plugin_dir_path . 'assets/js/frontend.js';
+        if (file_exists($js_min)) {
+            $js_file = $plugin_dir_url . 'assets/js/frontend.min.js';
+            $js_ver  = filemtime($js_min);
+        } elseif (file_exists($js_reg)) {
+            $js_file = $plugin_dir_url . 'assets/js/frontend.js';
+            $js_ver  = filemtime($js_reg);
+        } else {
+            $js_file = false;
+            $js_ver  = '3.9.2';
+        }
 
-        // has_shortcode() requires the shortcode to be registered first (done in init).
-        if (has_shortcode($content, 'mlcm_menu')) return true;
+        if ($js_file) {
+            wp_enqueue_script('mlcm-frontend', $js_file, [], $js_ver, true);
 
-        // has_block() works reliably only after the queried post is set.
-        if (has_block('mlcm/menu-block', $content)) return true;
+            wp_localize_script('mlcm-frontend', 'mlcmVars', [
+                'ajax_url'          => admin_url('admin-ajax.php'),
+                'labels'            => $options['labels'],
+                'use_category_base' => $options['use_category_base'],
+                'use_static'        => $options['use_static_files'] ? '1' : '0',
+                'static_url'        => esc_url($this->cache_url),
+                'file_versions'     => $this->get_file_versions(),
+                'max_levels'        => $options['max_levels'],
+            ]);
+        }
 
-        return false;
-    }
-
-    /**
-     * Hooked to template_redirect to guarantee $post is available before
-     * deciding whether to enqueue assets. Registers the actual enqueue
-     * callback on wp_enqueue_scripts so assets are output in <head>.
-     */
-    public function maybe_enqueue_frontend_assets() {
-        if ($this->page_uses_plugin()) {
-            add_action('wp_enqueue_scripts', [$this, 'enqueue_frontend_assets']);
+        $custom_css = $this->generate_inline_css($options);
+        if (!empty($custom_css) && $css_file) {
+            wp_add_inline_style('mlcm-frontend', $custom_css);
         }
     }
 
@@ -638,63 +668,6 @@ class Multi_Level_Category_Menu {
         }
     }
 
-    public function enqueue_frontend_assets() {
-        $options         = $this->get_options();
-        $plugin_dir_url  = plugin_dir_url(__FILE__);
-        $plugin_dir_path = plugin_dir_path(__FILE__);
-
-        // CSS
-        $css_min = $plugin_dir_path . 'assets/css/frontend.min.css';
-        $css_reg = $plugin_dir_path . 'assets/css/frontend.css';
-        if (file_exists($css_min)) {
-            $css_file = $plugin_dir_url . 'assets/css/frontend.min.css';
-            $css_ver  = filemtime($css_min);
-        } elseif (file_exists($css_reg)) {
-            $css_file = $plugin_dir_url . 'assets/css/frontend.css';
-            $css_ver  = filemtime($css_reg);
-        } else {
-            $css_file = false;
-            $css_ver  = '3.9.1';
-        }
-
-        if ($css_file) {
-            wp_enqueue_style('mlcm-frontend', $css_file, [], $css_ver);
-        }
-
-        // JS
-        $js_min = $plugin_dir_path . 'assets/js/frontend.min.js';
-        $js_reg = $plugin_dir_path . 'assets/js/frontend.js';
-        if (file_exists($js_min)) {
-            $js_file = $plugin_dir_url . 'assets/js/frontend.min.js';
-            $js_ver  = filemtime($js_min);
-        } elseif (file_exists($js_reg)) {
-            $js_file = $plugin_dir_url . 'assets/js/frontend.js';
-            $js_ver  = filemtime($js_reg);
-        } else {
-            $js_file = false;
-            $js_ver  = '3.9.1';
-        }
-
-        if ($js_file) {
-            wp_enqueue_script('mlcm-frontend', $js_file, [], $js_ver, true);
-
-            wp_localize_script('mlcm-frontend', 'mlcmVars', [
-                'ajax_url'          => admin_url('admin-ajax.php'),
-                'labels'            => $options['labels'],
-                'use_category_base' => $options['use_category_base'],
-                'use_static'        => $options['use_static_files'] ? '1' : '0',
-                'static_url'        => esc_url($this->cache_url),
-                'file_versions'     => $this->get_file_versions(),
-                'max_levels'        => $options['max_levels'],
-            ]);
-        }
-
-        $custom_css = $this->generate_inline_css($options);
-        if (!empty($custom_css) && $css_file) {
-            wp_add_inline_style('mlcm-frontend', $custom_css);
-        }
-    }
-
     public function add_admin_menu() {
         add_options_page(
             'Category Menu Settings',
@@ -744,7 +717,7 @@ class Multi_Level_Category_Menu {
             $js_ver  = filemtime($js_reg);
         } else {
             $js_file = $plugin_dir_url . 'assets/js/block-editor.js';
-            $js_ver  = '3.9.1';
+            $js_ver  = '3.9.2';
         }
 
         wp_enqueue_script('mlcm-block-editor', $js_file,
@@ -763,7 +736,7 @@ class Multi_Level_Category_Menu {
             $css_ver  = filemtime($css_reg);
         } else {
             $css_file = $plugin_dir_url . 'assets/css/block-editor.css';
-            $css_ver  = '3.9.1';
+            $css_ver  = '3.9.2';
         }
 
         wp_enqueue_style('mlcm-block-editor', $css_file, [], $css_ver);
@@ -791,7 +764,7 @@ class Multi_Level_Category_Menu {
             $css_ver  = filemtime($css_reg);
         } else {
             $css_file = $plugin_dir_url . 'assets/css/admin.css';
-            $css_ver  = '3.9.1';
+            $css_ver  = '3.9.2';
         }
         wp_enqueue_style('mlcm-admin', $css_file, [], $css_ver);
 
@@ -806,7 +779,7 @@ class Multi_Level_Category_Menu {
             $js_ver  = filemtime($js_reg);
         } else {
             $js_file = $plugin_dir_url . 'assets/js/admin.js';
-            $js_ver  = '3.9.1';
+            $js_ver  = '3.9.2';
         }
         wp_enqueue_script('mlcm-admin', $js_file, ['jquery'], $js_ver, true);
 
