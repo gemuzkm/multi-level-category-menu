@@ -7,6 +7,7 @@
 defined('WP_UNINSTALL_PLUGIN') || exit;
 
 // ── 1. Delete all mlcm_* options ───────────────────────────────────────────
+// Static options
 $option_names = [
     'mlcm_font_size',
     'mlcm_container_gap',
@@ -24,7 +25,13 @@ $option_names = [
     'mlcm_use_static_files',
 ];
 
-for ($i = 1; $i <= 10; $i++) {
+// Dynamically delete all possible mlcm_level_{N}_label options
+// Read max_levels from DB first; fall back to 10 to ensure full cleanup
+$max_levels = max(1, absint(get_option('mlcm_max_levels', 10)));
+if ($max_levels < 10) {
+    $max_levels = 10; // always clean up at least 10 levels on uninstall
+}
+for ($i = 1; $i <= $max_levels; $i++) {
     $option_names[] = 'mlcm_level_' . $i . '_label';
 }
 
@@ -33,7 +40,7 @@ foreach ($option_names as $opt) {
 }
 
 // ── 2. Remove cache directory via WP_Filesystem ────────────────────────────
-$uploads  = wp_upload_dir();
+$uploads   = wp_upload_dir();
 $cache_dir = $uploads['basedir'] . '/mlcm-menu-cache';
 
 if (is_dir($cache_dir)) {

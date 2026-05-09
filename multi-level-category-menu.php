@@ -2,9 +2,11 @@
 /*
 Plugin Name: Multi-Level Category Menu
 Description: Creates customizable category menus with configurable depth
-Version: 3.7.0
-Author: Name
+Version: 3.8.0
+Author: gemuzkm
+Author URI: https://github.com/gemuzkm
 Text Domain: mlcm
+Domain Path: /languages
 */
 
 defined('ABSPATH') || exit;
@@ -29,11 +31,13 @@ class Multi_Level_Category_Menu {
         return self::$instance;
     }
 
-    public function __construct() {
+    // Private constructor enforces Singleton — prevents direct instantiation
+    private function __construct() {
         $uploads          = wp_upload_dir();
         $this->cache_dir  = $uploads['basedir'] . '/mlcm-menu-cache';
         $this->cache_url  = $uploads['baseurl'] . '/mlcm-menu-cache';
 
+        add_action('init',                        [$this, 'load_textdomain']);
         add_shortcode('mlcm_menu',                [$this, 'shortcode_handler']);
         add_action('widgets_init',                [$this, 'register_widget']);
         add_action('init',                        [$this, 'register_gutenberg_block']);
@@ -52,6 +56,14 @@ class Multi_Level_Category_Menu {
         add_action('delete_category', [$this, 'invalidate_cache']);
 
         add_action('admin_enqueue_scripts', [$this, 'enqueue_admin_assets']);
+    }
+
+    public function load_textdomain() {
+        load_plugin_textdomain(
+            'mlcm',
+            false,
+            dirname(plugin_basename(__FILE__)) . '/languages'
+        );
     }
 
     private function init_cache_dir() {
@@ -78,30 +90,30 @@ class Multi_Level_Category_Menu {
         if (null === $this->options_cache) {
             $max = $this->max_levels();
             $this->options_cache = [
-                'font_size'           => sanitize_text_field(get_option('mlcm_font_size', '')),
-                'container_gap'       => absint(get_option('mlcm_container_gap', 0)),
-                'button_bg_color'     => sanitize_hex_color(get_option('mlcm_button_bg_color', '')),
-                'button_font_size'    => sanitize_text_field(get_option('mlcm_button_font_size', '')),
+                'font_size'             => sanitize_text_field(get_option('mlcm_font_size', '')),
+                'container_gap'         => absint(get_option('mlcm_container_gap', 0)),
+                'button_bg_color'       => sanitize_hex_color(get_option('mlcm_button_bg_color', '')),
+                'button_font_size'      => sanitize_text_field(get_option('mlcm_button_font_size', '')),
                 'button_hover_bg_color' => sanitize_hex_color(get_option('mlcm_button_hover_bg_color', '')),
-                'menu_layout'         => sanitize_text_field(get_option('mlcm_menu_layout', 'vertical')),
-                'initial_levels'      => absint(get_option('mlcm_initial_levels', 3)),
-                'max_levels'          => $max,
-                'menu_width'          => absint(get_option('mlcm_menu_width', 250)),
-                'show_button'         => get_option('mlcm_show_button', '0') === '1',
-                'use_category_base'   => get_option('mlcm_use_category_base', '1') === '1',
-                'custom_root_id'      => absint(get_option('mlcm_custom_root_id', 0)),
-                'excluded_cats'       => sanitize_text_field(get_option('mlcm_excluded_cats', '')),
-                'labels'              => array_map(function ($i) {
+                'menu_layout'           => sanitize_text_field(get_option('mlcm_menu_layout', 'vertical')),
+                'initial_levels'        => absint(get_option('mlcm_initial_levels', 3)),
+                'max_levels'            => $max,
+                'menu_width'            => absint(get_option('mlcm_menu_width', 250)),
+                'show_button'           => get_option('mlcm_show_button', '0') === '1',
+                'use_category_base'     => get_option('mlcm_use_category_base', '1') === '1',
+                'custom_root_id'        => absint(get_option('mlcm_custom_root_id', 0)),
+                'excluded_cats'         => sanitize_text_field(get_option('mlcm_excluded_cats', '')),
+                'labels'                => array_map(function ($i) {
                     return sanitize_text_field(get_option("mlcm_level_{$i}_label", "Level {$i}"));
                 }, range(1, $max)),
-                'use_static_files'    => get_option('mlcm_use_static_files', '1') === '1',
+                'use_static_files'      => get_option('mlcm_use_static_files', '1') === '1',
             ];
         }
         return $this->options_cache;
     }
 
     private function generate_inline_css($options) {
-        $parts = [];
+        $parts     = [];
         $sel_props = [];
 
         if (!empty($options['menu_width']) && $options['menu_width'] > 0) {
@@ -118,8 +130,9 @@ class Multi_Level_Category_Menu {
             $parts[] = ".mlcm-container{gap:{$options['container_gap']}px}";
         }
 
+        // sanitize_hex_color() already applied on save — use value directly
         $btn_props = [];
-        if (!empty($options['button_bg_color']) && preg_match('/^#[a-fA-F0-9]{6}$/', $options['button_bg_color'])) {
+        if (!empty($options['button_bg_color'])) {
             $btn_props[] = "background:{$options['button_bg_color']}";
         }
         if (!empty($options['button_font_size']) && is_numeric($options['button_font_size'])) {
@@ -129,7 +142,7 @@ class Multi_Level_Category_Menu {
             $parts[] = '.mlcm-go-button{' . implode(';', $btn_props) . '}';
         }
 
-        if (!empty($options['button_hover_bg_color']) && preg_match('/^#[a-fA-F0-9]{6}$/', $options['button_hover_bg_color'])) {
+        if (!empty($options['button_hover_bg_color'])) {
             $parts[] = ".mlcm-go-button:hover{background:{$options['button_hover_bg_color']}}";
         }
 
@@ -152,7 +165,7 @@ class Multi_Level_Category_Menu {
             'mlcm-block-editor',
             plugins_url('assets/js/block-editor.js', __FILE__),
             ['wp-blocks', 'wp-i18n', 'wp-element', 'wp-components', 'wp-editor'],
-            file_exists($js_path) ? filemtime($js_path) : '3.7.0'
+            file_exists($js_path) ? filemtime($js_path) : '3.8.0'
         );
 
         register_block_type('mlcm/menu-block', [
@@ -176,6 +189,10 @@ class Multi_Level_Category_Menu {
         return $this->generate_menu_html($atts);
     }
 
+    /**
+     * Returns categories for a given parent, using a single DB query
+     * instead of N+1 calls (get_term_children per category).
+     */
     private function get_categories_data($parent_id = 0) {
         $options  = $this->get_options();
         $excluded = [];
@@ -184,7 +201,9 @@ class Multi_Level_Category_Menu {
             $excluded = array_filter(array_map('absint', array_map('trim', explode(',', $options['excluded_cats']))));
         }
 
-        $categories = get_categories([
+        // Fetch direct children
+        $categories = get_terms([
+            'taxonomy'   => 'category',
             'parent'     => $parent_id,
             'exclude'    => $excluded,
             'hide_empty' => false,
@@ -193,18 +212,38 @@ class Multi_Level_Category_Menu {
             'fields'     => 'all',
         ]);
 
+        if (is_wp_error($categories) || empty($categories)) {
+            return [];
+        }
+
+        // Collect all child IDs in one query to avoid N+1
+        $all_ids        = wp_list_pluck($categories, 'term_id');
+        $children_query = get_terms([
+            'taxonomy'   => 'category',
+            'parent__in' => $all_ids,
+            'hide_empty' => false,
+            'fields'     => 'id=>parent',
+            'number'     => 0,
+        ]);
+
+        // Build a set of parent IDs that have at least one child
+        $parents_with_children = [];
+        if (!is_wp_error($children_query)) {
+            foreach ($children_query as $child_parent_id) {
+                $parents_with_children[(int) $child_parent_id] = true;
+            }
+        }
+
         $result = [];
         foreach ($categories as $category) {
             if (!isset($category->term_id, $category->name)) continue;
-
-            $children_count = count(get_term_children($category->term_id, 'category'));
 
             $result[$category->term_id] = [
                 'id'          => $category->term_id,
                 'name'        => strtoupper(htmlspecialchars_decode($category->name)),
                 'slug'        => $category->slug ?? '',
                 'url'         => get_category_link($category->term_id),
-                'hasChildren' => $children_count > 0,
+                'hasChildren' => isset($parents_with_children[$category->term_id]),
             ];
         }
 
@@ -227,9 +266,9 @@ class Multi_Level_Category_Menu {
 
     public function generate_static_menus() {
         $this->init_cache_dir();
-        $options       = $this->get_options();
-        $custom_root   = $options['custom_root_id'] > 0 ? $options['custom_root_id'] : 0;
-        $max           = $options['max_levels'];
+        $options     = $this->get_options();
+        $custom_root = $options['custom_root_id'] > 0 ? $options['custom_root_id'] : 0;
+        $max         = $options['max_levels'];
 
         try {
             $level_1_data          = $this->get_categories_data($custom_root);
@@ -238,14 +277,14 @@ class Multi_Level_Category_Menu {
             $level                 = 1;
 
             for ($level = 2; $level <= $max; $level++) {
-                $level_data          = [];
-                $next_level_parents  = [];
+                $level_data         = [];
+                $next_level_parents = [];
 
                 foreach ($current_level_parents as $parent_id) {
                     $subcats = $this->get_categories_data($parent_id);
                     if (!empty($subcats)) {
-                        $level_data[$parent_id]  = array_values($subcats);
-                        $next_level_parents       = array_merge($next_level_parents, array_keys($subcats));
+                        $level_data[$parent_id] = array_values($subcats);
+                        $next_level_parents      = array_merge($next_level_parents, array_keys($subcats));
                     }
                 }
 
@@ -317,6 +356,9 @@ class Multi_Level_Category_Menu {
             if ($content !== false && preg_match('/window\.mlcmLevel1\s*=\s*(.+?);?\s*$/s', $content, $m)) {
                 $decoded = json_decode(trim($m[1]), true);
                 if (json_last_error() === JSON_ERROR_NONE) return $decoded;
+                error_log('MLCM: Failed to parse level-1.js cache — ' . json_last_error_msg());
+            } else {
+                error_log('MLCM: Could not read level-1.js cache file.');
             }
         }
 
@@ -369,7 +411,13 @@ class Multi_Level_Category_Menu {
         wp_die();
     }
 
+    /**
+     * Public AJAX handler for frontend subcategory requests.
+     * Validates nonce generated by wp_localize_script (mlcmVars.nonce).
+     */
     public function ajax_handler() {
+        check_ajax_referer('mlcm_frontend_nonce', 'security');
+
         header('Cache-Control: no-cache, no-store, must-revalidate');
         $parent_id = absint($_POST['parent_id'] ?? 0);
         if ($parent_id < 0) {
@@ -378,6 +426,21 @@ class Multi_Level_Category_Menu {
         }
         $categories = $this->get_categories_data($parent_id);
         wp_send_json_success(array_values($categories));
+    }
+
+    /**
+     * Checks whether the current page uses the plugin's shortcode or block,
+     * to allow conditional asset loading.
+     */
+    private function page_uses_plugin() {
+        if (is_admin()) return false;
+        global $post;
+        if (!($post instanceof WP_Post)) return false;
+
+        $content = $post->post_content;
+        if (has_shortcode($content, 'mlcm_menu')) return true;
+        if (has_block('mlcm/menu-block', $content)) return true;
+        return false;
     }
 
     private function generate_menu_html($atts) {
@@ -389,11 +452,11 @@ class Multi_Level_Category_Menu {
         ob_start();
         ?>
         <div class="mlcm-container <?php echo esc_attr($atts['layout']); ?>"
-             data-levels="<?php echo $levels_out; ?>"
+             data-levels="<?php echo esc_attr($levels_out); ?>"
              data-use-static="<?php echo $options['use_static_files'] ? '1' : '0'; ?>"
              data-static-url="<?php echo esc_url($this->cache_url); ?>">
             <?php for ($i = 1; $i <= $levels_out; $i++) : ?>
-                <div class="mlcm-level" data-level="<?php echo $i; ?>">
+                <div class="mlcm-level" data-level="<?php echo esc_attr($i); ?>">
                     <?php $this->render_select($i, $level_1); ?>
                 </div>
             <?php endfor; ?>
@@ -417,7 +480,7 @@ class Multi_Level_Category_Menu {
         <label for="<?php echo esc_attr($select_id); ?>" id="<?php echo esc_attr($label_id); ?>" class="mlcm-screen-reader-text">
             <?php echo esc_html($label); ?>
         </label>
-        <select id="<?php echo esc_attr($select_id); ?>" class="mlcm-select" data-level="<?php echo $level; ?>"
+        <select id="<?php echo esc_attr($select_id); ?>" class="mlcm-select" data-level="<?php echo esc_attr($level); ?>"
                 aria-labelledby="<?php echo esc_attr($label_id); ?>"
                 <?php echo $level > 1 ? 'disabled' : ''; ?>>
             <option value="-1"><?php echo esc_html($label); ?></option>
@@ -548,6 +611,11 @@ class Multi_Level_Category_Menu {
     }
 
     public function enqueue_frontend_assets() {
+        // Load assets only on pages that actually use the plugin
+        if (!$this->page_uses_plugin() && !is_active_widget(false, false, 'mlcm_widget', true)) {
+            return;
+        }
+
         $options         = $this->get_options();
         $plugin_dir_url  = plugin_dir_url(__FILE__);
         $plugin_dir_path = plugin_dir_path(__FILE__);
@@ -563,14 +631,14 @@ class Multi_Level_Category_Menu {
             $css_ver  = filemtime($css_reg);
         } else {
             $css_file = false;
-            $css_ver  = '3.7.0';
+            $css_ver  = '3.8.0';
         }
 
         if ($css_file) {
             wp_enqueue_style('mlcm-frontend', $css_file, [], $css_ver);
         }
 
-        // JS — no jQuery dependency
+        // JS
         $js_min = $plugin_dir_path . 'assets/js/frontend.min.js';
         $js_reg = $plugin_dir_path . 'assets/js/frontend.js';
         if (file_exists($js_min)) {
@@ -581,15 +649,15 @@ class Multi_Level_Category_Menu {
             $js_ver  = filemtime($js_reg);
         } else {
             $js_file = false;
-            $js_ver  = '3.7.0';
+            $js_ver  = '3.8.0';
         }
 
         if ($js_file) {
-            // No jQuery in deps array
             wp_enqueue_script('mlcm-frontend', $js_file, [], $js_ver, true);
 
             wp_localize_script('mlcm-frontend', 'mlcmVars', [
                 'ajax_url'          => admin_url('admin-ajax.php'),
+                'nonce'             => wp_create_nonce('mlcm_frontend_nonce'),
                 'labels'            => $options['labels'],
                 'use_category_base' => $options['use_category_base'],
                 'use_static'        => $options['use_static_files'] ? '1' : '0',
@@ -654,7 +722,7 @@ class Multi_Level_Category_Menu {
             $js_ver  = filemtime($js_reg);
         } else {
             $js_file = $plugin_dir_url . 'assets/js/block-editor.js';
-            $js_ver  = '3.7.0';
+            $js_ver  = '3.8.0';
         }
 
         wp_enqueue_script('mlcm-block-editor', $js_file,
@@ -673,7 +741,7 @@ class Multi_Level_Category_Menu {
             $css_ver  = filemtime($css_reg);
         } else {
             $css_file = $plugin_dir_url . 'assets/css/block-editor.css';
-            $css_ver  = '3.7.0';
+            $css_ver  = '3.8.0';
         }
 
         wp_enqueue_style('mlcm-block-editor', $css_file, [], $css_ver);
@@ -701,7 +769,7 @@ class Multi_Level_Category_Menu {
             $css_ver  = filemtime($css_reg);
         } else {
             $css_file = $plugin_dir_url . 'assets/css/admin.css';
-            $css_ver  = '3.7.0';
+            $css_ver  = '3.8.0';
         }
         wp_enqueue_style('mlcm-admin', $css_file, [], $css_ver);
 
@@ -716,7 +784,7 @@ class Multi_Level_Category_Menu {
             $js_ver  = filemtime($js_reg);
         } else {
             $js_file = $plugin_dir_url . 'assets/js/admin.js';
-            $js_ver  = '3.7.0';
+            $js_ver  = '3.8.0';
         }
         wp_enqueue_script('mlcm-admin', $js_file, ['jquery'], $js_ver, true);
 
