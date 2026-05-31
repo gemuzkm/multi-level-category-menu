@@ -1,8 +1,11 @@
 <?php
 /*
 Plugin Name: Multi-Level Category Menu
-Description: Creates customizable category menus with configurable depth. Fully compatible with page caching plugins (FlyingPress, WP Rocket, Cloudflare, etc.) — no frontend nonce required.
-Version: 3.9.2
+Description: Creates customizable category menus with configurable depth. Fully compatible with page caching plugins (FlyingPress, WP Rocket, Cloudflare, etc.) — no frontend nonce required. Tested with WordPress 7.0.
+Version: 3.9.3
+Requires at least: 5.8
+Tested up to: 7.0
+Requires PHP: 7.4
 Author: gemuzkm
 Author URI: https://github.com/gemuzkm
 Text Domain: mlcm
@@ -42,7 +45,7 @@ class Multi_Level_Category_Menu {
         add_action('widgets_init',                [$this, 'register_widget']);
         add_action('init',                        [$this, 'register_gutenberg_block']);
 
-        // Unconditionally enqueue frontend assets on public pages.
+        // Unconditionally enqueue frontend assets on every public page.
         // The JS is idempotent: it only initializes when .mlcm-container exists,
         // so loading it everywhere is safe and removes timing issues with
         // shortcode/block detection (archives, widgets, ACF, page builders, etc.).
@@ -170,8 +173,8 @@ class Multi_Level_Category_Menu {
         wp_register_script(
             'mlcm-block-editor',
             plugins_url('assets/js/block-editor.js', __FILE__),
-            ['wp-blocks', 'wp-i18n', 'wp-element', 'wp-components', 'wp-editor'],
-            file_exists($js_path) ? filemtime($js_path) : '3.9.2'
+            ['wp-blocks', 'wp-i18n', 'wp-element', 'wp-components'],
+            file_exists($js_path) ? filemtime($js_path) : '3.9.3'
         );
 
         register_block_type('mlcm/menu-block', [
@@ -460,7 +463,7 @@ class Multi_Level_Category_Menu {
             $css_ver  = filemtime($css_reg);
         } else {
             $css_file = false;
-            $css_ver  = '3.9.2';
+            $css_ver  = '3.9.3';
         }
 
         if ($css_file) {
@@ -478,7 +481,7 @@ class Multi_Level_Category_Menu {
             $js_ver  = filemtime($js_reg);
         } else {
             $js_file = false;
-            $js_ver  = '3.9.2';
+            $js_ver  = '3.9.3';
         }
 
         if ($js_file) {
@@ -717,11 +720,11 @@ class Multi_Level_Category_Menu {
             $js_ver  = filemtime($js_reg);
         } else {
             $js_file = $plugin_dir_url . 'assets/js/block-editor.js';
-            $js_ver  = '3.9.2';
+            $js_ver  = '3.9.3';
         }
 
         wp_enqueue_script('mlcm-block-editor', $js_file,
-            ['wp-blocks', 'wp-i18n', 'wp-element', 'wp-components', 'wp-editor'],
+            ['wp-blocks', 'wp-i18n', 'wp-element', 'wp-components'],
             $js_ver
         );
 
@@ -736,7 +739,7 @@ class Multi_Level_Category_Menu {
             $css_ver  = filemtime($css_reg);
         } else {
             $css_file = $plugin_dir_url . 'assets/css/block-editor.css';
-            $css_ver  = '3.9.2';
+            $css_ver  = '3.9.3';
         }
 
         wp_enqueue_style('mlcm-block-editor', $css_file, [], $css_ver);
@@ -764,7 +767,7 @@ class Multi_Level_Category_Menu {
             $css_ver  = filemtime($css_reg);
         } else {
             $css_file = $plugin_dir_url . 'assets/css/admin.css';
-            $css_ver  = '3.9.2';
+            $css_ver  = '3.9.3';
         }
         wp_enqueue_style('mlcm-admin', $css_file, [], $css_ver);
 
@@ -779,7 +782,7 @@ class Multi_Level_Category_Menu {
             $js_ver  = filemtime($js_reg);
         } else {
             $js_file = $plugin_dir_url . 'assets/js/admin.js';
-            $js_ver  = '3.9.2';
+            $js_ver  = '3.9.3';
         }
         wp_enqueue_script('mlcm-admin', $js_file, ['jquery'], $js_ver, true);
 
