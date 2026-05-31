@@ -1,8 +1,8 @@
 {
   "$schema": "https://schemas.wp.org/trunk/block.json",
-  "apiVersion": 2,
+  "apiVersion": 3,
   "name": "mlcm/menu-block",
-  "version": "3.9.2",
+  "version": "3.9.3",
   "title": "Multi-Level Category Menu",
   "category": "widgets",
   "icon": "list-view",
