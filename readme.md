@@ -1,21 +1,23 @@
 # Multi-Level Category Menu
 
-**Version:** 3.9.0  
+**Version:** 3.9.3  
 **Requires at least:** WordPress 5.8  
-**Tested up to:** WordPress 6.8  
+**Tested up to:** WordPress 7.0  
+**Requires PHP:** 7.4  
 **License:** GPL v2 or later
 
 ## Description
 
-A powerful WordPress plugin that creates customizable multi-level category menus with configurable depth. Fully compatible with all page caching solutions — no frontend nonce is used, ensuring the plugin works seamlessly on cached pages without any additional configuration.
+A powerful WordPress plugin that creates customizable multi-level category menus with configurable depth. Fully compatible with all page caching solutions — no frontend nonce is used, ensuring the plugin works seamlessly on cached pages without any additional configuration. Tested and compatible with WordPress 7.0.
 
 ## Features
 
 - **Multi-Level Category Menus** — Support for up to 10 levels of nested categories (configurable)
+- **WordPress 7.0 Compatible** — Gutenberg block uses Block API v3, fully compatible with the iframed editor
 - **Page Cache Friendly** — No frontend nonce; works out-of-the-box with any page caching plugin
 - **Static JavaScript File Caching** — Generate static JS files for faster loading and CDN compatibility
 - **Gzip Compression** — Automatic gzip compression for cache files to reduce bandwidth
-- **Gutenberg Block Support** — Add menus directly from the block editor
+- **Gutenberg Block Support** — Add menus directly from the block editor (Block API v3)
 - **Widget Support** — Use as a sidebar widget
 - **Shortcode** — `[mlcm_menu]` for easy placement anywhere
 - **Customizable Labels** — Set custom labels for each menu level
@@ -24,16 +26,23 @@ A powerful WordPress plugin that creates customizable multi-level category menus
 - **AJAX Loading** — Dynamic subcategory loading without page refresh (fallback mode)
 - **Custom Root Category** — Select a specific category as the root for menu generation
 - **Category Exclusion** — Exclude specific categories from the menu
-- **Alphabetical Sorting** — Automatic sorting of categories by name
-- **Performance Optimized** — Conditional script loading and efficient caching
+- **Alphabetical Sorting** — Automatic sorting of categories by name (stable across all MySQL collations)
+- **Performance Optimized** — Static file generation, efficient caching, minimal PHP on frontend
 - **Auto-Redirect** — Automatically redirects to category page when selected category has no subcategories
 - **Cache Management** — Easy cache file generation and deletion from admin panel
+
+## Requirements
+
+- **WordPress:** 5.8 or later
+- **PHP:** 7.4 or later
+- **Tested up to:** WordPress 7.0
 
 ## Installation
 
 1. Upload the plugin files to `/wp-content/plugins/multi-level-category-menu/`
 2. Activate the plugin through the 'Plugins' menu in WordPress
 3. Configure settings in **Settings → Category Menu**
+4. Click **Generate Menu Files** to create static JavaScript cache files
 
 ## Usage
 
@@ -71,9 +80,10 @@ Navigate to **Settings → Category Menu** to configure:
 - **Container Gap** — Gap between menu items (px)
 - **Button Colors** — Background and hover colors
 - **Menu Layout** — Vertical or horizontal
-- **Initial Levels** — Number of visible levels
+- **Initial Levels** — Number of visible levels on page load
+- **Max Menu Depth** — Maximum number of levels supported (1–10)
 - **Menu Width** — Width of menu items (px)
-- **Show Go Button** — Enable/disable the "Go" button
+- **Show Go Button** — Enable/disable the “Go” button
 - **Use Static JavaScript Files** — Enable static file generation for better performance and CDN caching
 - **Custom Root Category ID** — Use a specific category as root
 - **Excluded Categories** — Comma-separated list of category IDs to exclude
@@ -109,34 +119,41 @@ When "Use Static JavaScript Files" is enabled:
 
 ### How It Works
 
-- **Static Mode (Recommended)**: Category data is pre-generated in JavaScript files, loaded via dynamic script tags
+- **Static Mode (Recommended)**: Category data is pre-generated in JavaScript files, loaded via dynamic script tags. Zero PHP/database overhead on frontend page views.
 - **AJAX Mode (Fallback)**: Subcategory data is fetched via AJAX without nonce — safe for cached pages
 
 ## Technical Details
 
 ### Performance Optimizations
 
-- Scripts load only on pages with the menu
-- Static JavaScript file generation for instant category loading
+- Static JavaScript file generation for instant category loading with zero runtime DB queries
 - Gzip compression for cache files (up to 85% size reduction)
-- Efficient caching system with automatic cache clearing
-- Optimized database queries with proper sorting
-- Debounced AJAX requests to prevent multiple calls
+- Efficient caching system with automatic cache clearing on category changes
 - File modification time-based versioning for optimal CDN caching
-- Smart loading indicators that only show during actual data loading
+- Atomic file writes (write to `.tmp` → rename) prevent serving partial cache files
+- Options loaded once per request and held in memory (no repeated `get_option()` calls)
+- N+1 query prevention: child existence checked in one batch query per level
+- Frontend JS loads in footer (`wp_enqueue_script` with `$in_footer = true`)
+
+### WordPress 7.0 Compatibility
+
+- Gutenberg block registered with **Block API v3** — required for WordPress 7.1+, compatible with the always-on iframed editor introduced in WordPress 7.0
+- `wp-editor` dependency removed from block editor script (deprecated in WordPress 6.x)
+- All standard WordPress hooks and APIs used; no deprecated functions
+- Requires PHP 7.4+ in line with WordPress 7.0 minimum requirements
 
 ### Security
 
 - Admin AJAX actions protected by WordPress nonce
 - Frontend AJAX endpoint is read-only — no state changes, no CSRF risk
-- Input sanitization and validation on all inputs
+- All inputs sanitized and validated (`sanitize_text_field`, `sanitize_hex_color`, `absint`, `esc_attr`, `esc_url`, `esc_html`)
 
 ### Sorting
 
-- Categories are sorted alphabetically by name (case-insensitive)
-- Sorting is applied consistently for all users (authenticated and non-authenticated)
-- Works correctly with cached data
-- JavaScript array format preserves sort order
+- Categories are sorted alphabetically by name (case-insensitive) using PHP `uasort()`
+- PHP-side sorting guarantees consistent order regardless of MySQL collation (important for sites with Cyrillic, Ukrainian, or other non-ASCII category names)
+- Sorting is applied after `strtoupper()` and `htmlspecialchars_decode()` transformations for accurate results
+- JavaScript array format preserves sort order from server
 
 ### Auto-Redirect Behavior
 
@@ -145,6 +162,17 @@ When "Use Static JavaScript Files" is enabled:
 - This provides a smooth user experience without requiring selection of all levels
 
 ## Changelog
+
+### 3.9.3
+- **WordPress 7.0 compatibility**: upgraded Gutenberg block from Block API v2 to v3 (v2 deprecated since WP 6.9, required for WP 7.1+)
+- Removed deprecated `wp-editor` dependency from block editor script; using `wp-components` only
+- Added `Requires PHP: 7.4` and `Tested up to: 7.0` headers to plugin file
+- Updated all fallback version strings to current plugin version
+- Updated plugin description to mention WordPress 7.0 compatibility
+
+### 3.9.2
+- Block API v3 preparation: `block.json` attributes updated with `minimum`/`maximum` validation
+- Minor stability improvements
 
 ### 3.9.0
 - **Removed frontend nonce** — plugin is now fully compatible with all page caching solutions without any configuration
