@@ -2,7 +2,7 @@
 /*
 Plugin Name: Multi-Level Category Menu
 Description: Creates customizable category menus with configurable depth. Fully compatible with page caching plugins (FlyingPress, WP Rocket, Cloudflare, etc.) — no frontend nonce required. Tested with WordPress 7.0.
-Version: 3.9.4
+Version: 3.9.5
 Requires at least: 5.8
 Tested up to: 7.0
 Requires PHP: 7.4
@@ -20,6 +20,9 @@ class Multi_Level_Category_Menu {
     private $options_cache = null;
     private $cache_dir     = null;
     private $cache_url     = null;
+
+    /** WP-Cron hook name for delayed regeneration. */
+    const CRON_HOOK = 'mlcm_scheduled_regenerate';
 
     private function max_levels() {
         return max(1, absint(get_option('mlcm_max_levels', 5)));
@@ -51,12 +54,84 @@ class Multi_Level_Category_Menu {
         add_action('wp_ajax_mlcm_generate_menu',            [$this, 'ajax_generate_menu']);
         add_action('wp_ajax_mlcm_delete_cache',             [$this, 'ajax_delete_cache']);
 
-        add_action('edited_category', [$this, 'invalidate_cache']);
-        add_action('create_category', [$this, 'invalidate_cache']);
-        add_action('delete_category', [$this, 'invalidate_cache']);
+        // Category change hooks — invalidate cache and optionally schedule regeneration.
+        add_action('edited_category', [$this, 'on_category_change']);
+        add_action('create_category', [$this, 'on_category_change']);
+        add_action('delete_category', [$this, 'on_category_change']);
+
+        // WP-Cron callback for delayed regeneration.
+        add_action(self::CRON_HOOK, [$this, 'scheduled_regenerate']);
 
         add_action('admin_enqueue_scripts', [$this, 'enqueue_admin_assets']);
     }
+
+    // -------------------------------------------------------------------------
+    // Activation / deactivation hooks (registered outside the class below).
+    // -------------------------------------------------------------------------
+
+    public static function on_activate() {
+        // Nothing to do on activate — cron is scheduled lazily on first change.
+    }
+
+    public static function on_deactivate() {
+        // Clear any pending scheduled regeneration so it doesn't fire after deactivation.
+        $timestamp = wp_next_scheduled(self::CRON_HOOK);
+        if ($timestamp) {
+            wp_unschedule_event($timestamp, self::CRON_HOOK);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Category change handler.
+    // -------------------------------------------------------------------------
+
+    /**
+     * Fired on edited_category / create_category / delete_category.
+     *
+     * Always invalidates the existing cache files immediately so the frontend
+     * falls back to AJAX mode while new files are being prepared.
+     *
+     * If "Auto-regenerate" is enabled, schedules a single WP-Cron event
+     * after the configured delay. Multiple rapid changes coalesce into one
+     * scheduled event: if an event is already pending we reschedule it,
+     * resetting the timer so the regeneration runs after the *last* change.
+     */
+    public function on_category_change() {
+        $this->invalidate_cache();
+
+        $options = $this->get_options();
+        if (!$options['use_static_files'] || !$options['auto_regenerate']) {
+            return;
+        }
+
+        $delay = max(10, min(60, (int) $options['regen_delay']));
+
+        // Cancel any already-scheduled event so we don't get duplicate runs
+        // and so rapid sequential changes reset the timer.
+        $existing = wp_next_scheduled(self::CRON_HOOK);
+        if ($existing) {
+            wp_unschedule_event($existing, self::CRON_HOOK);
+        }
+
+        wp_schedule_single_event(time() + $delay, self::CRON_HOOK);
+    }
+
+    /**
+     * WP-Cron callback: regenerate static menu files.
+     * Runs $delay seconds after the last category change.
+     */
+    public function scheduled_regenerate() {
+        $options = $this->get_options();
+        if (!$options['use_static_files']) {
+            return;
+        }
+        $result = $this->generate_static_menus();
+        if (!$result['success']) {
+            error_log('MLCM scheduled_regenerate failed: ' . $result['message']);
+        }
+    }
+
+    // -------------------------------------------------------------------------
 
     public function load_textdomain() {
         load_plugin_textdomain(
@@ -107,6 +182,9 @@ class Multi_Level_Category_Menu {
                     return sanitize_text_field(get_option("mlcm_level_{$i}_label", "Level {$i}"));
                 }, range(1, $max)),
                 'use_static_files'      => get_option('mlcm_use_static_files', '1') === '1',
+                // Auto-regeneration settings.
+                'auto_regenerate'       => get_option('mlcm_auto_regenerate', '0') === '1',
+                'regen_delay'           => max(10, min(60, absint(get_option('mlcm_regen_delay', 30)))),
             ];
         }
         return $this->options_cache;
@@ -163,7 +241,7 @@ class Multi_Level_Category_Menu {
             'mlcm-block-editor',
             plugins_url('assets/js/block-editor.js', __FILE__),
             ['wp-blocks', 'wp-i18n', 'wp-element', 'wp-components'],
-            file_exists($js_path) ? filemtime($js_path) : '3.9.4'
+            file_exists($js_path) ? filemtime($js_path) : '3.9.5'
         );
 
         register_block_type('mlcm/menu-block', [
@@ -285,11 +363,6 @@ class Multi_Level_Category_Menu {
                 $current_level_parents = array_unique($next_level_parents);
             }
 
-            // Write versions.js — maps each level to its filemtime.
-            // This file is loaded via wp_enqueue_script (WordPress adds ?ver=filemtime
-            // to the <script> tag in HTML), so it is always fresh even from page cache.
-            // The file itself contains filemtime values read at generation time, giving
-            // frontend.js the correct ?v= parameter for each dynamic level-N.js request.
             $this->write_versions_file($level);
 
             $meta = [
@@ -306,21 +379,6 @@ class Multi_Level_Category_Menu {
         }
     }
 
-    /**
-     * Write versions.js — a tiny JS file that maps level numbers to filemtime values.
-     *
-     * Example output:
-     *   window.mlcmVersions={"1":1780848816,"2":1780848820,"3":1780848821};
-     *
-     * This file is registered with wp_enqueue_script so WordPress appends its own
-     * ?ver=filemtime(versions.js) to the <script src> in the HTML. Because WordPress
-     * controls the URL (not our JS), it is immune to FlyingPress / Cloudflare page
-     * cache serving stale HTML with missing ?v= parameters for level-2+.
-     *
-     * frontend.js reads window.mlcmVersions instead of mlcmVars.file_versions when
-     * this file is present, so dynamic <script> tags for level-2.js etc. always get
-     * the correct ?v= suffix regardless of whether the page came from cache.
-     */
     private function write_versions_file($levels_count) {
         $versions = [];
         for ($i = 1; $i <= $levels_count; $i++) {
@@ -413,12 +471,6 @@ class Multi_Level_Category_Menu {
         return array_values($this->get_categories_data($root > 0 ? $root : 0));
     }
 
-    /**
-     * Returns file versions from versions.js if it exists (preferred),
-     * falling back to reading filemtime of each level-N.js directly.
-     * Used only as a fallback in mlcmVars — the canonical source is
-     * window.mlcmVersions set by the enqueued versions.js file.
-     */
     private function get_file_versions() {
         $versions_file = $this->cache_dir . '/versions.js';
         if (file_exists($versions_file)) {
@@ -431,7 +483,6 @@ class Multi_Level_Category_Menu {
             }
         }
 
-        // Fallback: read filemtime directly
         $versions = [];
         $max      = $this->max_levels();
         for ($level = 1; $level <= $max; $level++) {
@@ -505,7 +556,7 @@ class Multi_Level_Category_Menu {
             $css_ver  = filemtime($css_reg);
         } else {
             $css_file = false;
-            $css_ver  = '3.9.4';
+            $css_ver  = '3.9.5';
         }
 
         if ($css_file) {
@@ -523,15 +574,10 @@ class Multi_Level_Category_Menu {
             $js_ver  = filemtime($js_reg);
         } else {
             $js_file = false;
-            $js_ver  = '3.9.4';
+            $js_ver  = '3.9.5';
         }
 
         if ($js_file) {
-            // Enqueue versions.js BEFORE frontend.js so window.mlcmVersions is
-            // available when frontend.js executes. WordPress adds ?ver=filemtime
-            // to the <script src> in HTML, making this URL stable in page cache.
-            // When versions.js does not yet exist (files not generated), we skip
-            // it — frontend.js will fall back to mlcmVars.file_versions.
             $versions_path = $this->cache_dir . '/versions.js';
             if ($options['use_static_files'] && file_exists($versions_path)) {
                 wp_enqueue_script(
@@ -633,6 +679,12 @@ class Multi_Level_Category_Menu {
         register_setting('mlcm_options', 'mlcm_use_category_base',     ['sanitize_callback' => 'rest_sanitize_boolean']);
         register_setting('mlcm_options', 'mlcm_custom_root_id',        ['sanitize_callback' => 'absint']);
         register_setting('mlcm_options', 'mlcm_use_static_files',      ['sanitize_callback' => 'rest_sanitize_boolean']);
+        register_setting('mlcm_options', 'mlcm_auto_regenerate',       ['sanitize_callback' => 'rest_sanitize_boolean']);
+        register_setting('mlcm_options', 'mlcm_regen_delay',           [
+            'sanitize_callback' => function ($v) {
+                return max(10, min(60, absint($v)));
+            },
+        ]);
 
         $max = $this->max_levels();
         for ($i = 1; $i <= $max; $i++) {
@@ -703,6 +755,28 @@ class Multi_Level_Category_Menu {
             $use_static = $options['use_static_files'] ? '1' : '0';
             echo '<label><input type="checkbox" name="mlcm_use_static_files" value="1" ' . checked($use_static, '1', false) . '> ' . __('Enable static file generation for better performance', 'mlcm') . '</label>';
             echo '<p class="description">When enabled, category data is stored in static JavaScript files instead of database queries. Click "Generate Menu" to create files.</p>';
+        }, 'mlcm_options', 'mlcm_main');
+
+        add_settings_field('mlcm_auto_regenerate', 'Auto-Regenerate on Category Change', function () use ($options) {
+            $checked = $options['auto_regenerate'] ? '1' : '0';
+            echo '<label><input type="checkbox" name="mlcm_auto_regenerate" value="1" ' . checked($checked, '1', false) . '> '
+                . __('Automatically regenerate menu files when a category is created, edited, or deleted', 'mlcm') . '</label>';
+            echo '<p class="description">';
+            echo __('Requires "Use Static JavaScript Files" to be enabled. Regeneration runs in the background via WP-Cron after the configured delay, so it does not slow down category saves.', 'mlcm');
+            echo '</p>';
+        }, 'mlcm_options', 'mlcm_main');
+
+        add_settings_field('mlcm_regen_delay', 'Auto-Regeneration Delay (seconds)', function () use ($options) {
+            $delay = $options['regen_delay'];
+            // Show scheduled status.
+            $next = wp_next_scheduled(self::CRON_HOOK);
+            $status = '';
+            if ($next) {
+                $in = $next - time();
+                $status = ' &nbsp;<span style="color:#2271b1;">&rarr; ' . sprintf(__('Scheduled in %d sec', 'mlcm'), max(0, $in)) . '</span>';
+            }
+            echo '<input type="number" min="10" max="60" step="1" name="mlcm_regen_delay" value="' . esc_attr($delay) . '">' . $status;
+            echo '<p class="description">' . __('Delay in seconds (10–60) between the last category change and menu file regeneration. Multiple rapid changes are coalesced — the timer resets on each change.', 'mlcm') . '</p>';
         }, 'mlcm_options', 'mlcm_main');
 
         add_settings_field('mlcm_exclude', 'Excluded Categories', function () use ($options) {
@@ -781,7 +855,7 @@ class Multi_Level_Category_Menu {
             $js_ver  = filemtime($js_reg);
         } else {
             $js_file = $plugin_dir_url . 'assets/js/block-editor.js';
-            $js_ver  = '3.9.4';
+            $js_ver  = '3.9.5';
         }
 
         wp_enqueue_script('mlcm-block-editor', $js_file,
@@ -799,7 +873,7 @@ class Multi_Level_Category_Menu {
             $css_ver  = filemtime($css_reg);
         } else {
             $css_file = $plugin_dir_url . 'assets/css/block-editor.css';
-            $css_ver  = '3.9.4';
+            $css_ver  = '3.9.5';
         }
 
         wp_enqueue_style('mlcm-block-editor', $css_file, [], $css_ver);
@@ -826,7 +900,7 @@ class Multi_Level_Category_Menu {
             $css_ver  = filemtime($css_reg);
         } else {
             $css_file = $plugin_dir_url . 'assets/css/admin.css';
-            $css_ver  = '3.9.4';
+            $css_ver  = '3.9.5';
         }
         wp_enqueue_style('mlcm-admin', $css_file, [], $css_ver);
 
@@ -840,7 +914,7 @@ class Multi_Level_Category_Menu {
             $js_ver  = filemtime($js_reg);
         } else {
             $js_file = $plugin_dir_url . 'assets/js/admin.js';
-            $js_ver  = '3.9.4';
+            $js_ver  = '3.9.5';
         }
         wp_enqueue_script('mlcm-admin', $js_file, ['jquery'], $js_ver, true);
 
@@ -859,5 +933,9 @@ class Multi_Level_Category_Menu {
         ]);
     }
 }
+
+// Activation / deactivation hooks must be registered before the instance is created.
+register_activation_hook(__FILE__,   ['Multi_Level_Category_Menu', 'on_activate']);
+register_deactivation_hook(__FILE__, ['Multi_Level_Category_Menu', 'on_deactivate']);
 
 Multi_Level_Category_Menu::get_instance();
