@@ -1,6 +1,6 @@
 # Multi-Level Category Menu
 
-**Version:** 3.9.3  
+**Version:** 3.9.4  
 **Requires at least:** WordPress 5.8  
 **Tested up to:** WordPress 7.0  
 **Requires PHP:** 7.4  
@@ -8,13 +8,14 @@
 
 ## Description
 
-A powerful WordPress plugin that creates customizable multi-level category menus with configurable depth. Fully compatible with all page caching solutions — no frontend nonce is used, ensuring the plugin works seamlessly on cached pages without any additional configuration. Tested and compatible with WordPress 7.0.
+A powerful WordPress plugin that creates customizable multi-level category menus with configurable depth. Fully compatible with page caching and CDN solutions — no frontend nonce is used, and static menu files now include a dedicated `versions.js` manifest to ensure correct cache-busting for all menu levels even on fully cached pages. Tested and compatible with WordPress 7.0.
 
 ## Features
 
 - **Multi-Level Category Menus** — Support for up to 10 levels of nested categories (configurable)
 - **WordPress 7.0 Compatible** — Gutenberg block uses Block API v3, fully compatible with the iframed editor
 - **Page Cache Friendly** — No frontend nonce; works out-of-the-box with any page caching plugin
+- **Cache-Safe Static File Versioning** — Dedicated `versions.js` manifest ensures correct `?v=` parameters for dynamically loaded level files on cached pages
 - **Static JavaScript File Caching** — Generate static JS files for faster loading and CDN compatibility
 - **Gzip Compression** — Automatic gzip compression for cache files to reduce bandwidth
 - **Gutenberg Block Support** — Add menus directly from the block editor (Block API v3)
@@ -43,6 +44,7 @@ A powerful WordPress plugin that creates customizable multi-level category menus
 2. Activate the plugin through the 'Plugins' menu in WordPress
 3. Configure settings in **Settings → Category Menu**
 4. Click **Generate Menu Files** to create static JavaScript cache files
+5. If you use full-page caching or CDN caching, purge page cache once after generating files so the latest `versions.js` is referenced immediately
 
 ## Usage
 
@@ -88,15 +90,15 @@ Navigate to **Settings → Category Menu** to configure:
 - **Custom Root Category ID** — Use a specific category as root
 - **Excluded Categories** — Comma-separated list of category IDs to exclude
 - **Level Labels** — Custom labels for each menu level
-- **Generate Menu Files** — Generate static JavaScript cache files
-- **Delete Cache Files** — Remove all generated cache files
+- **Generate Menu Files** — Generate static JavaScript cache files and refresh `versions.js`
+- **Delete Cache Files** — Remove all generated cache files, including `versions.js`
 
 ## Caching Compatibility
 
 The plugin is fully compatible with:
 
 - **Cloudflare** — Static JavaScript files with file modification time versioning for proper caching
-- **FlyingPress** — Works without any exclusion rules
+- **FlyingPress** — Compatible with cached guest pages; `versions.js` keeps dynamic level files versioned correctly
 - **WP Rocket** — No additional configuration needed
 - **W3 Total Cache** — Full compatibility
 - **WP Super Cache** — Works seamlessly
@@ -111,6 +113,8 @@ Frontend nonces are tied to user sessions and change on every page load, which b
 When "Use Static JavaScript Files" is enabled:
 
 - Category data is stored in static JavaScript files (`/wp-content/uploads/mlcm-menu-cache/`)
+- A separate `versions.js` manifest stores file modification times for all generated menu levels
+- `versions.js` is enqueued by WordPress before frontend initialization, ensuring fresh version data even on cached pages
 - Files are automatically gzipped for bandwidth savings
 - File modification time is used for cache versioning (CDN-friendly)
 - Files are automatically regenerated when categories are created, edited, or deleted
@@ -119,7 +123,7 @@ When "Use Static JavaScript Files" is enabled:
 
 ### How It Works
 
-- **Static Mode (Recommended)**: Category data is pre-generated in JavaScript files, loaded via dynamic script tags. Zero PHP/database overhead on frontend page views.
+- **Static Mode (Recommended)**: Category data is pre-generated in JavaScript files, loaded via dynamic script tags. A small `versions.js` manifest ensures the correct `?v=` parameter is applied to every level file, even when the page HTML comes from cache.
 - **AJAX Mode (Fallback)**: Subcategory data is fetched via AJAX without nonce — safe for cached pages
 
 ## Technical Details
@@ -127,6 +131,7 @@ When "Use Static JavaScript Files" is enabled:
 ### Performance Optimizations
 
 - Static JavaScript file generation for instant category loading with zero runtime DB queries
+- Dedicated `versions.js` manifest for cache-safe dynamic file versioning on full-page-cached sites
 - Gzip compression for cache files (up to 85% size reduction)
 - Efficient caching system with automatic cache clearing on category changes
 - File modification time-based versioning for optimal CDN caching
@@ -134,6 +139,7 @@ When "Use Static JavaScript Files" is enabled:
 - Options loaded once per request and held in memory (no repeated `get_option()` calls)
 - N+1 query prevention: child existence checked in one batch query per level
 - Frontend JS loads in footer (`wp_enqueue_script` with `$in_footer = true`)
+- `versions.js` is tiny and adds negligible overhead while eliminating stale cached HTML issues for dynamic level files
 
 ### WordPress 7.0 Compatibility
 
@@ -162,6 +168,14 @@ When "Use Static JavaScript Files" is enabled:
 - This provides a smooth user experience without requiring selection of all levels
 
 ## Changelog
+
+### 3.9.4
+- Fixed cached guest-page issue where dynamically loaded `level-2.js` and higher could be requested without a `?v=` parameter on fully cached pages
+- Added dedicated `versions.js` manifest with file modification times for generated menu levels
+- `versions.js` is now enqueued by WordPress before frontend initialization, making dynamic level file versioning independent of stale cached HTML
+- Updated frontend loader to prefer `window.mlcmVersions` over localized page data, with fallback for installations that have not yet regenerated static files
+- Cache deletion now removes `versions.js` and its gzipped variant alongside other generated menu files
+- Plugin version bumped to 3.9.4
 
 ### 3.9.3
 - **WordPress 7.0 compatibility**: upgraded Gutenberg block from Block API v2 to v3 (v2 deprecated since WP 6.9, required for WP 7.1+)
