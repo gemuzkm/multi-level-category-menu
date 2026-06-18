@@ -1,18 +1,19 @@
 # Multi-Level Category Menu
 
-**Version:** 3.9.4  
-**Requires at least:** WordPress 5.8  
-**Tested up to:** WordPress 7.0  
-**Requires PHP:** 7.4  
+**Version:** 3.9.5
+**Requires at least:** WordPress 5.8
+**Tested up to:** WordPress 7.0
+**Requires PHP:** 7.4
 **License:** GPL v2 or later
 
 ## Description
 
-A powerful WordPress plugin that creates customizable multi-level category menus with configurable depth. Fully compatible with page caching and CDN solutions — no frontend nonce is used, and static menu files now include a dedicated `versions.js` manifest to ensure correct cache-busting for all menu levels even on fully cached pages. Tested and compatible with WordPress 7.0.
+A powerful WordPress plugin that creates customizable multi-level category menus with configurable depth. Fully compatible with page caching and CDN solutions — no frontend nonce is used, and static menu files include a dedicated `versions.js` manifest to ensure correct cache-busting for all menu levels even on fully cached pages. Category changes can automatically trigger background regeneration of static files via WP-Cron with a configurable delay, so saving a category never slows down the admin. Tested and compatible with WordPress 7.0.
 
 ## Features
 
 - **Multi-Level Category Menus** — Support for up to 10 levels of nested categories (configurable)
+- **Auto-Regenerate on Category Change** — Static menu files are automatically regenerated via WP-Cron when categories are created, edited, or deleted; configurable delay (10–60 s) prevents server load spikes during bulk edits
 - **WordPress 7.0 Compatible** — Gutenberg block uses Block API v3, fully compatible with the iframed editor
 - **Page Cache Friendly** — No frontend nonce; works out-of-the-box with any page caching plugin
 - **Cache-Safe Static File Versioning** — Dedicated `versions.js` manifest ensures correct `?v=` parameters for dynamically loaded level files on cached pages
@@ -80,17 +81,19 @@ Navigate to **Settings → Category Menu** to configure:
 
 - **Font Size** — Set font size for menu items (rem)
 - **Container Gap** — Gap between menu items (px)
-- **Button Colors** — Background and hover colors
+- **Button Colors** — Background and hover colors for the Go button
 - **Menu Layout** — Vertical or horizontal
 - **Initial Levels** — Number of visible levels on page load
 - **Max Menu Depth** — Maximum number of levels supported (1–10)
-- **Menu Width** — Width of menu items (px)
-- **Show Go Button** — Enable/disable the “Go” button
+- **Menu Width** — Width of each menu select (px)
+- **Show Go Button** — Enable/disable the "Go" button
 - **Use Static JavaScript Files** — Enable static file generation for better performance and CDN caching
+- **Auto-Regenerate on Category Change** — Automatically regenerate static menu files in the background when a category is created, edited, or deleted (requires static files to be enabled)
+- **Auto-Regeneration Delay** — Delay in seconds (10–60) between the last category change and regeneration; rapid successive changes are coalesced into a single run; the settings page shows how many seconds remain until the next scheduled run
 - **Custom Root Category ID** — Use a specific category as root
 - **Excluded Categories** — Comma-separated list of category IDs to exclude
 - **Level Labels** — Custom labels for each menu level
-- **Generate Menu Files** — Generate static JavaScript cache files and refresh `versions.js`
+- **Generate Menu Files** — Manually generate static JavaScript cache files and refresh `versions.js`
 - **Delete Cache Files** — Remove all generated cache files, including `versions.js`
 
 ## Caching Compatibility
@@ -110,21 +113,28 @@ Frontend nonces are tied to user sessions and change on every page load, which b
 
 ### Static File Caching
 
-When "Use Static JavaScript Files" is enabled:
+When **Use Static JavaScript Files** is enabled:
 
 - Category data is stored in static JavaScript files (`/wp-content/uploads/mlcm-menu-cache/`)
 - A separate `versions.js` manifest stores file modification times for all generated menu levels
 - `versions.js` is enqueued by WordPress before frontend initialization, ensuring fresh version data even on cached pages
 - Files are automatically gzipped for bandwidth savings
 - File modification time is used for cache versioning (CDN-friendly)
-- Files are automatically regenerated when categories are created, edited, or deleted
 - Browser caching is optimized with proper cache headers (7 days)
 - Fallback to AJAX if static files are unavailable
 
+When **Auto-Regenerate on Category Change** is also enabled:
+
+- The old cache files are deleted immediately on every category change so the frontend falls back to AJAX mode instantly — visitors never see stale data
+- A WP-Cron event is scheduled to regenerate files after the configured delay
+- If multiple categories are changed in quick succession the timer resets on each change, so only one regeneration run is triggered
+- Regeneration happens entirely in the background and does not affect the response time of the category save action
+- On plugin deactivation any pending scheduled event is automatically cancelled
+
 ### How It Works
 
-- **Static Mode (Recommended)**: Category data is pre-generated in JavaScript files, loaded via dynamic script tags. A small `versions.js` manifest ensures the correct `?v=` parameter is applied to every level file, even when the page HTML comes from cache.
-- **AJAX Mode (Fallback)**: Subcategory data is fetched via AJAX without nonce — safe for cached pages
+- **Static Mode (Recommended)**: Category data is pre-generated in JavaScript files, loaded via dynamic script tags. A small `versions.js` manifest ensures the correct `?v=` parameter is applied to every level file, even when the page HTML comes from cache. With auto-regeneration enabled, files stay up to date automatically without any manual intervention.
+- **AJAX Mode (Fallback)**: Subcategory data is fetched via AJAX without nonce — safe for cached pages. Used automatically when static files are unavailable (e.g., immediately after a category change while the scheduled regeneration has not yet completed).
 
 ## Technical Details
 
@@ -140,6 +150,7 @@ When "Use Static JavaScript Files" is enabled:
 - N+1 query prevention: child existence checked in one batch query per level
 - Frontend JS loads in footer (`wp_enqueue_script` with `$in_footer = true`)
 - `versions.js` is tiny and adds negligible overhead while eliminating stale cached HTML issues for dynamic level files
+- WP-Cron–based auto-regeneration keeps the category save action fast regardless of menu size
 
 ### WordPress 7.0 Compatibility
 
@@ -153,6 +164,7 @@ When "Use Static JavaScript Files" is enabled:
 - Admin AJAX actions protected by WordPress nonce
 - Frontend AJAX endpoint is read-only — no state changes, no CSRF risk
 - All inputs sanitized and validated (`sanitize_text_field`, `sanitize_hex_color`, `absint`, `esc_attr`, `esc_url`, `esc_html`)
+- Auto-regeneration delay clamped server-side to 10–60 s, cannot be set outside that range
 
 ### Sorting
 
@@ -169,13 +181,20 @@ When "Use Static JavaScript Files" is enabled:
 
 ## Changelog
 
+### 3.9.5
+- **New**: Added **Auto-Regenerate on Category Change** option — when enabled, static menu files are automatically regenerated via WP-Cron after the configured delay whenever a category is created, edited, or deleted
+- **New**: Added **Auto-Regeneration Delay** setting (10–60 seconds); multiple rapid category changes are coalesced into a single regeneration run — the timer resets on each change
+- The settings page shows a live countdown ("Scheduled in N sec") when a regeneration run is pending
+- Old cache files are invalidated immediately on category change so the frontend switches to AJAX fallback mode instantly while new files are being prepared in the background
+- Any pending scheduled regeneration is automatically cancelled when the plugin is deactivated
+- Plugin version bumped to 3.9.5
+
 ### 3.9.4
 - Fixed cached guest-page issue where dynamically loaded `level-2.js` and higher could be requested without a `?v=` parameter on fully cached pages
 - Added dedicated `versions.js` manifest with file modification times for generated menu levels
 - `versions.js` is now enqueued by WordPress before frontend initialization, making dynamic level file versioning independent of stale cached HTML
 - Updated frontend loader to prefer `window.mlcmVersions` over localized page data, with fallback for installations that have not yet regenerated static files
 - Cache deletion now removes `versions.js` and its gzipped variant alongside other generated menu files
-- Plugin version bumped to 3.9.4
 
 ### 3.9.3
 - **WordPress 7.0 compatibility**: upgraded Gutenberg block from Block API v2 to v3 (v2 deprecated since WP 6.9, required for WP 7.1+)
@@ -192,7 +211,6 @@ When "Use Static JavaScript Files" is enabled:
 - **Removed frontend nonce** — plugin is now fully compatible with all page caching solutions without any configuration
 - Removed `Cache-Control: no-cache` header from AJAX handler (safe for caching proxies)
 - Updated plugin description to reflect caching-first approach
-- Version bumped to reflect breaking change in frontend JS (remove `nonce` from `mlcmVars`)
 
 ### 3.8.0
 - Configurable max levels (up to 10)
