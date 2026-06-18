@@ -2,7 +2,7 @@
 /*
 Plugin Name: Multi-Level Category Menu
 Description: Creates customizable category menus with configurable depth. Fully compatible with page caching plugins (FlyingPress, WP Rocket, Cloudflare, etc.) — no frontend nonce required. Tested with WordPress 7.0.
-Version: 3.9.3
+Version: 3.9.4
 Requires at least: 5.8
 Tested up to: 7.0
 Requires PHP: 7.4
@@ -21,8 +21,6 @@ class Multi_Level_Category_Menu {
     private $cache_dir     = null;
     private $cache_url     = null;
 
-    // Maximum number of levels supported by the plugin.
-    // Can be overridden via the mlcm_max_levels option.
     private function max_levels() {
         return max(1, absint(get_option('mlcm_max_levels', 5)));
     }
@@ -34,7 +32,6 @@ class Multi_Level_Category_Menu {
         return self::$instance;
     }
 
-    // Private constructor enforces Singleton — prevents direct instantiation
     private function __construct() {
         $uploads          = wp_upload_dir();
         $this->cache_dir  = $uploads['basedir'] . '/mlcm-menu-cache';
@@ -44,13 +41,7 @@ class Multi_Level_Category_Menu {
         add_shortcode('mlcm_menu',                [$this, 'shortcode_handler']);
         add_action('widgets_init',                [$this, 'register_widget']);
         add_action('init',                        [$this, 'register_gutenberg_block']);
-
-        // Unconditionally enqueue frontend assets on every public page.
-        // The JS is idempotent: it only initializes when .mlcm-container exists,
-        // so loading it everywhere is safe and removes timing issues with
-        // shortcode/block detection (archives, widgets, ACF, page builders, etc.).
         add_action('wp_enqueue_scripts',          [$this, 'enqueue_frontend_assets']);
-
         add_action('enqueue_block_editor_assets', [$this, 'enqueue_block_editor_assets']);
         add_action('admin_init',                  [$this, 'register_settings']);
         add_action('admin_menu',                  [$this, 'add_admin_menu']);
@@ -139,7 +130,6 @@ class Multi_Level_Category_Menu {
             $parts[] = ".mlcm-container{gap:{$options['container_gap']}px}";
         }
 
-        // sanitize_hex_color() already applied on save — use value directly
         $btn_props = [];
         if (!empty($options['button_bg_color'])) {
             $btn_props[] = "background:{$options['button_bg_color']}";
@@ -168,13 +158,12 @@ class Multi_Level_Category_Menu {
             return;
         }
 
-        // Fallback: manual registration (no block.json)
         $js_path = plugin_dir_path(__FILE__) . 'assets/js/block-editor.js';
         wp_register_script(
             'mlcm-block-editor',
             plugins_url('assets/js/block-editor.js', __FILE__),
             ['wp-blocks', 'wp-i18n', 'wp-element', 'wp-components'],
-            file_exists($js_path) ? filemtime($js_path) : '3.9.3'
+            file_exists($js_path) ? filemtime($js_path) : '3.9.4'
         );
 
         register_block_type('mlcm/menu-block', [
@@ -198,10 +187,6 @@ class Multi_Level_Category_Menu {
         return $this->generate_menu_html($atts);
     }
 
-    /**
-     * Returns categories for a given parent, using a single DB query
-     * instead of N+1 calls (get_term_children per category).
-     */
     private function get_categories_data($parent_id = 0) {
         $options  = $this->get_options();
         $excluded = [];
@@ -210,7 +195,6 @@ class Multi_Level_Category_Menu {
             $excluded = array_filter(array_map('absint', array_map('trim', explode(',', $options['excluded_cats']))));
         }
 
-        // Fetch direct children
         $categories = get_terms([
             'taxonomy'   => 'category',
             'parent'     => $parent_id,
@@ -225,7 +209,6 @@ class Multi_Level_Category_Menu {
             return [];
         }
 
-        // Collect all child IDs in one query to avoid N+1
         $all_ids        = wp_list_pluck($categories, 'term_id');
         $children_query = get_terms([
             'taxonomy'   => 'category',
@@ -235,7 +218,6 @@ class Multi_Level_Category_Menu {
             'number'     => 0,
         ]);
 
-        // Build a set of parent IDs that have at least one child
         $parents_with_children = [];
         if (!is_wp_error($children_query)) {
             foreach ($children_query as $child_parent_id) {
@@ -303,6 +285,13 @@ class Multi_Level_Category_Menu {
                 $current_level_parents = array_unique($next_level_parents);
             }
 
+            // Write versions.js — maps each level to its filemtime.
+            // This file is loaded via wp_enqueue_script (WordPress adds ?ver=filemtime
+            // to the <script> tag in HTML), so it is always fresh even from page cache.
+            // The file itself contains filemtime values read at generation time, giving
+            // frontend.js the correct ?v= parameter for each dynamic level-N.js request.
+            $this->write_versions_file($level);
+
             $meta = [
                 'generated_at'        => current_time('mysql'),
                 'generated_timestamp' => time(),
@@ -314,6 +303,56 @@ class Multi_Level_Category_Menu {
             return ['success' => true, 'message' => 'Menu generated successfully', 'levels' => $level];
         } catch (Exception $e) {
             return ['success' => false, 'message' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Write versions.js — a tiny JS file that maps level numbers to filemtime values.
+     *
+     * Example output:
+     *   window.mlcmVersions={"1":1780848816,"2":1780848820,"3":1780848821};
+     *
+     * This file is registered with wp_enqueue_script so WordPress appends its own
+     * ?ver=filemtime(versions.js) to the <script src> in the HTML. Because WordPress
+     * controls the URL (not our JS), it is immune to FlyingPress / Cloudflare page
+     * cache serving stale HTML with missing ?v= parameters for level-2+.
+     *
+     * frontend.js reads window.mlcmVersions instead of mlcmVars.file_versions when
+     * this file is present, so dynamic <script> tags for level-2.js etc. always get
+     * the correct ?v= suffix regardless of whether the page came from cache.
+     */
+    private function write_versions_file($levels_count) {
+        $versions = [];
+        for ($i = 1; $i <= $levels_count; $i++) {
+            $f = $this->cache_dir . "/level-{$i}.js";
+            if (file_exists($f)) {
+                $versions[$i] = filemtime($f);
+            }
+        }
+
+        $json     = json_encode($versions, JSON_UNESCAPED_SLASHES);
+        $content  = "window.mlcmVersions={$json};";
+        $filepath = $this->cache_dir . '/versions.js';
+        $tmp      = $filepath . '.tmp';
+
+        if (file_put_contents($tmp, $content) === false) {
+            throw new Exception("Failed to write versions.js temp file");
+        }
+        if (!rename($tmp, $filepath)) {
+            @unlink($tmp);
+            throw new Exception("Failed to rename versions.js temp file");
+        }
+
+        if (extension_loaded('zlib')) {
+            $gz_data = gzencode($content, 9);
+            if ($gz_data !== false) {
+                $gz_tmp = $filepath . '.gz.tmp';
+                if (file_put_contents($gz_tmp, $gz_data) !== false) {
+                    rename($gz_tmp, $filepath . '.gz');
+                } else {
+                    @unlink($gz_tmp);
+                }
+            }
         }
     }
 
@@ -335,7 +374,6 @@ class Multi_Level_Category_Menu {
 
         $js_content = "window.{$var_name} = {$json};";
 
-        // Atomic write: write to tmp then rename
         if (file_put_contents($tmp_path, $js_content) === false) {
             throw new Exception("Failed to write temp file: {$tmp_path}");
         }
@@ -375,7 +413,25 @@ class Multi_Level_Category_Menu {
         return array_values($this->get_categories_data($root > 0 ? $root : 0));
     }
 
+    /**
+     * Returns file versions from versions.js if it exists (preferred),
+     * falling back to reading filemtime of each level-N.js directly.
+     * Used only as a fallback in mlcmVars — the canonical source is
+     * window.mlcmVersions set by the enqueued versions.js file.
+     */
     private function get_file_versions() {
+        $versions_file = $this->cache_dir . '/versions.js';
+        if (file_exists($versions_file)) {
+            $content = file_get_contents($versions_file);
+            if ($content !== false && preg_match('/window\.mlcmVersions\s*=\s*(\{[^}]+\})/', $content, $m)) {
+                $decoded = json_decode($m[1], true);
+                if (json_last_error() === JSON_ERROR_NONE) {
+                    return $decoded;
+                }
+            }
+        }
+
+        // Fallback: read filemtime directly
         $versions = [];
         $max      = $this->max_levels();
         for ($level = 1; $level <= $max; $level++) {
@@ -390,8 +446,9 @@ class Multi_Level_Category_Menu {
         if ($files) {
             foreach ($files as $file) { @unlink($file); }
         }
-        @unlink($this->cache_dir . '/meta.js');
-        @unlink($this->cache_dir . '/meta.js.gz');
+        foreach (['meta.js', 'meta.js.gz', 'versions.js', 'versions.js.gz'] as $f) {
+            @unlink($this->cache_dir . '/' . $f);
+        }
     }
 
     public function ajax_generate_menu() {
@@ -420,11 +477,6 @@ class Multi_Level_Category_Menu {
         wp_die();
     }
 
-    /**
-     * Public AJAX handler for frontend subcategory requests.
-     * No nonce required — safe for use with full-page caching.
-     * Data is read-only (no state changes), so no CSRF risk.
-     */
     public function ajax_handler() {
         $parent_id = absint($_POST['parent_id'] ?? 0);
         if ($parent_id < 0) {
@@ -435,16 +487,6 @@ class Multi_Level_Category_Menu {
         wp_send_json_success(array_values($categories));
     }
 
-    /**
-     * Enqueue frontend CSS and JS.
-     *
-     * Assets are loaded unconditionally on every public page. This is the
-     * only reliable way to support every rendering path (post content,
-     * widgets, page builders, ACF fields, archives, WooCommerce templates,
-     * etc.). The frontend JS is idempotent — it initializes only when a
-     * `.mlcm-container` element is present in the DOM, so loading it
-     * everywhere has negligible cost.
-     */
     public function enqueue_frontend_assets() {
         if (is_admin()) return;
 
@@ -463,7 +505,7 @@ class Multi_Level_Category_Menu {
             $css_ver  = filemtime($css_reg);
         } else {
             $css_file = false;
-            $css_ver  = '3.9.3';
+            $css_ver  = '3.9.4';
         }
 
         if ($css_file) {
@@ -481,11 +523,31 @@ class Multi_Level_Category_Menu {
             $js_ver  = filemtime($js_reg);
         } else {
             $js_file = false;
-            $js_ver  = '3.9.3';
+            $js_ver  = '3.9.4';
         }
 
         if ($js_file) {
-            wp_enqueue_script('mlcm-frontend', $js_file, [], $js_ver, true);
+            // Enqueue versions.js BEFORE frontend.js so window.mlcmVersions is
+            // available when frontend.js executes. WordPress adds ?ver=filemtime
+            // to the <script src> in HTML, making this URL stable in page cache.
+            // When versions.js does not yet exist (files not generated), we skip
+            // it — frontend.js will fall back to mlcmVars.file_versions.
+            $versions_path = $this->cache_dir . '/versions.js';
+            if ($options['use_static_files'] && file_exists($versions_path)) {
+                wp_enqueue_script(
+                    'mlcm-versions',
+                    esc_url($this->cache_url . '/versions.js'),
+                    [],
+                    filemtime($versions_path),
+                    true
+                );
+            }
+
+            $deps = ($options['use_static_files'] && file_exists($versions_path))
+                ? ['mlcm-versions']
+                : [];
+
+            wp_enqueue_script('mlcm-frontend', $js_file, $deps, $js_ver, true);
 
             wp_localize_script('mlcm-frontend', 'mlcmVars', [
                 'ajax_url'          => admin_url('admin-ajax.php'),
@@ -709,7 +771,6 @@ class Multi_Level_Category_Menu {
         $plugin_dir_url  = plugin_dir_url(__FILE__);
         $plugin_dir_path = plugin_dir_path(__FILE__);
 
-        // JS
         $js_min = $plugin_dir_path . 'assets/js/block-editor.min.js';
         $js_reg = $plugin_dir_path . 'assets/js/block-editor.js';
         if (file_exists($js_min)) {
@@ -720,7 +781,7 @@ class Multi_Level_Category_Menu {
             $js_ver  = filemtime($js_reg);
         } else {
             $js_file = $plugin_dir_url . 'assets/js/block-editor.js';
-            $js_ver  = '3.9.3';
+            $js_ver  = '3.9.4';
         }
 
         wp_enqueue_script('mlcm-block-editor', $js_file,
@@ -728,7 +789,6 @@ class Multi_Level_Category_Menu {
             $js_ver
         );
 
-        // CSS
         $css_min = $plugin_dir_path . 'assets/css/block-editor.min.css';
         $css_reg = $plugin_dir_path . 'assets/css/block-editor.css';
         if (file_exists($css_min)) {
@@ -739,7 +799,7 @@ class Multi_Level_Category_Menu {
             $css_ver  = filemtime($css_reg);
         } else {
             $css_file = $plugin_dir_url . 'assets/css/block-editor.css';
-            $css_ver  = '3.9.3';
+            $css_ver  = '3.9.4';
         }
 
         wp_enqueue_style('mlcm-block-editor', $css_file, [], $css_ver);
@@ -756,7 +816,6 @@ class Multi_Level_Category_Menu {
         $plugin_dir_url  = plugin_dir_url(__FILE__);
         $plugin_dir_path = plugin_dir_path(__FILE__);
 
-        // CSS
         $css_min = $plugin_dir_path . 'assets/css/admin.min.css';
         $css_reg = $plugin_dir_path . 'assets/css/admin.css';
         if (file_exists($css_min)) {
@@ -767,11 +826,10 @@ class Multi_Level_Category_Menu {
             $css_ver  = filemtime($css_reg);
         } else {
             $css_file = $plugin_dir_url . 'assets/css/admin.css';
-            $css_ver  = '3.9.3';
+            $css_ver  = '3.9.4';
         }
         wp_enqueue_style('mlcm-admin', $css_file, [], $css_ver);
 
-        // JS
         $js_min = $plugin_dir_path . 'assets/js/admin.min.js';
         $js_reg = $plugin_dir_path . 'assets/js/admin.js';
         if (file_exists($js_min)) {
@@ -782,7 +840,7 @@ class Multi_Level_Category_Menu {
             $js_ver  = filemtime($js_reg);
         } else {
             $js_file = $plugin_dir_url . 'assets/js/admin.js';
-            $js_ver  = '3.9.3';
+            $js_ver  = '3.9.4';
         }
         wp_enqueue_script('mlcm-admin', $js_file, ['jquery'], $js_ver, true);
 
