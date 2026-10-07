@@ -143,7 +143,7 @@ Test against your taxonomy, plugins and CDN before production rollout.
 ## Development and Git workflow
 
 Use a feature branch, open a pull request against `main`, and merge only after
-review and green **Plugin tests** checks. No direct deployment or automatic
+review and green **Plugin tests and release** checks. No direct deployment or automatic
 merge is configured. This is a lightweight branch/PR workflow, not a mandatory
 Git Flow model with permanent `develop`/release branches.
 
@@ -173,9 +173,60 @@ MLCM_TEST_ENV=1 wp eval-file tests/uninstall.php --path=/tmp/wordpress
 ```
 
 These tests create categories, change settings and delete plugin data.
-See [the implementation ticket](docs/optimization-ticket.md) for the eight-point
+See [the implementation ticket](https://github.com/gemuzkm/multi-level-category-menu/issues/1) for the eight-point
 scope and acceptance criteria. Automated tests do not replace staging checks
 with your theme, full-page cache, CSP and CDN.
+
+## Publishing a release
+
+After the release changes are merged into `main` and validated on staging,
+create and push an annotated tag:
+
+```bash
+git switch main
+git pull --ff-only origin main
+git tag -a v3.10.0 -m "Multi-Level Category Menu 3.10.0"
+git push origin v3.10.0
+```
+
+Pushing a `vX.Y.Z` tag runs version validation, asset/minification tests, package
+tests and the WordPress/PHP matrix. Only after all checks pass does the workflow
+publish a GitHub Release with generated notes and these assets:
+
+```text
+multi-level-category-menu-3.10.0.zip
+multi-level-category-menu-3.10.0.zip.sha256
+```
+
+The tag must match the PHP plugin header, `package.json`, `assets/js/block.json`
+and the README version. Its commit must belong to `main`. For a later release,
+update all four versions, rebuild/commit assets, merge the PR, then push the
+new tag. Only stable `vX.Y.Z` releases are supported by this workflow.
+Do not move a published tag; existing releases are never overwritten.
+
+The ZIP contains one `multi-level-category-menu/` directory with only the plugin
+PHP files, `readme.md`, `assets/` and `includes/`. Tests, build tools, dependency
+files and GitHub configuration stay in the development repository, not the ZIP.
+GitHub's automatically generated source archives are not the installable asset
+maintained by this workflow; use the named plugin ZIP.
+
+To build the same package locally from a clean, committed checkout:
+
+```bash
+npm ci
+npm run build
+npm test
+npm run package
+```
+
+Packaging uses `git archive` and writes ZIP/SHA256 files to ignored `dist/`.
+The packaging tests also require Python 3's standard library to inspect ZIP
+contents. No separate ZIP library is needed at runtime.
+
+PRs and pushes to `main`/`develop` run validation only. A manual workflow run
+does not publish a release. The publishing job alone has `contents: write`;
+it uses GitHub's built-in token, with no personal access token required.
+This publishes on GitHub only: it does not install updates on WordPress.
 
 ## Changelog
 
