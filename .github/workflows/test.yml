@@ -1,6 +1,9 @@
 name: Plugin tests
 on:
   push:
+    branches:
+      - main
+      - develop
   pull_request:
   workflow_dispatch:
 permissions:
@@ -10,10 +13,10 @@ concurrency:
   cancel-in-progress: true
 jobs:
   assets:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.0.0
         with:
           node-version: '22'
           cache: npm
@@ -22,7 +25,7 @@ jobs:
       - run: git diff --exit-code -- assets/
       - run: npm test
   wordpress:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -49,7 +52,7 @@ jobs:
           --health-timeout=5s
           --health-retries=10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
       - uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ matrix.php }}
