@@ -12,10 +12,9 @@
     const labels     = vars.labels || [];
     const ajaxUrl    = vars.ajax_url || '';
 
-    // window.mlcmVersions is set by the separately-enqueued versions.js file.
-    // WordPress controls the <script src> URL for versions.js (adds ?ver=filemtime),
-    // so this object is always fresh even when the page HTML comes from cache.
-    // Fall back to mlcmVars.file_versions when versions.js was not yet generated.
+    // New pages pin immutable generation URLs. Cached HTML intentionally keeps
+    // its own snapshot until page-cache expiry/purge; a manifest cannot refresh
+    // server-rendered options inside already-cached HTML.
     const fileVersions = (typeof window.mlcmVersions !== 'undefined')
         ? window.mlcmVersions
         : (vars.file_versions || {});
@@ -25,17 +24,11 @@
     function qs(sel, ctx) { return (ctx || document).querySelector(sel); }
     function qsa(sel, ctx) { return Array.from((ctx || document).querySelectorAll(sel)); }
 
-    function debounce(fn, ms) {
-        let t;
-        return function () {
-            clearTimeout(t);
-            t = setTimeout(() => fn.apply(this, arguments), ms);
-        };
-    }
-
     /* ── static JS file loader ────────────────────────────── */
 
     const levelCache = {};
+    const pending = {};
+    const revisions = new WeakMap();
 
     function loadLevelData(level, parentId, callback) {
         if (!useStatic) {
@@ -46,51 +39,50 @@
         const maxLvl = parseInt(vars.max_levels) || 5;
         if (level < 1 || level > maxLvl) { callback(null); return; }
 
-        const varName = 'mlcmLevel' + level;
+        const split = vars.parent_files && level > 1;
+        const key = split ? level + ':' + parentId : String(level);
+        const varName = split ? 'mlcmL' + level + '_' + parentId : 'mlcmLevel' + level;
+        const resolve = function (data) {
+            callback(Array.isArray(data) ? data : (getSubcatsForParent(data, parentId) || []));
+        };
 
-        if (levelCache[level]) { callback(levelCache[level]); return; }
+        if (Object.prototype.hasOwnProperty.call(levelCache, key)) { resolve(levelCache[key]); return; }
+        if (pending[key]) { pending[key].push({ parentId, resolve, callback }); return; }
 
         if (typeof window[varName] !== 'undefined') {
-            levelCache[level] = window[varName];
+            levelCache[key] = window[varName];
             delete window[varName];
-            callback(levelCache[level]);
+            resolve(levelCache[key]);
             return;
         }
 
-        // Use fileVersions (from versions.js) for the ?v= parameter.
-        // fileVersions is read from window.mlcmVersions which is loaded by a
-        // separately-enqueued <script> tag whose URL WordPress stamps with
-        // ?ver=filemtime — immune to stale page cache.
+        pending[key] = [{ parentId, resolve, callback }];
         const ver = fileVersions[level] || fileVersions[String(level)] || '';
-        const url = staticUrl + '/level-' + level + '.js' + (ver ? '?v=' + ver : '');
+        const filename = split ? 'l' + level + '-' + parentId + '.js' : 'level-' + level + '.js';
+        const url = staticUrl + '/' + filename + (ver ? '?v=' + encodeURIComponent(ver) : '');
 
         const script = document.createElement('script');
         script.src   = url;
         script.async = true;
 
-        const timer = setTimeout(function () {
+        function finish(ok) {
+            clearTimeout(timer);
             script.onload = script.onerror = null;
             if (script.parentNode) script.parentNode.removeChild(script);
-            loadLevelDataAjax(parentId, callback);
-        }, 10000);
-
-        script.onload = function () {
-            clearTimeout(timer);
-            if (script.parentNode) script.parentNode.removeChild(script);
-            if (typeof window[varName] !== 'undefined') {
-                levelCache[level] = window[varName];
+            const listeners = pending[key] || [];
+            delete pending[key];
+            const data = window[varName];
+            if (ok && data && typeof data === 'object') {
+                levelCache[key] = data;
                 delete window[varName];
-                callback(levelCache[level]);
+                listeners.forEach(function (item) { item.resolve(data); });
             } else {
-                loadLevelDataAjax(parentId, callback);
+                listeners.forEach(function (item) { loadLevelDataAjax(item.parentId, item.callback); });
             }
-        };
-
-        script.onerror = function () {
-            clearTimeout(timer);
-            if (script.parentNode) script.parentNode.removeChild(script);
-            loadLevelDataAjax(parentId, callback);
-        };
+        }
+        const timer = setTimeout(function () { finish(false); }, 10000);
+        script.onload = function () { finish(true); };
+        script.onerror = function () { finish(false); };
 
         document.head.appendChild(script);
     }
@@ -137,7 +129,7 @@
     }
 
     function optionTag(id, name, slug, url) {
-        return '<option value="' + id + '" data-slug="' + escAttr(slug) + '" data-url="' + escAttr(url) + '">' + escHtml(name) + '</option>';
+        return '<option value="' + escAttr(String(id)) + '" data-slug="' + escAttr(slug) + '" data-url="' + escAttr(url) + '">' + escHtml(name) + '</option>';
     }
 
     function escHtml(s) {
@@ -163,6 +155,8 @@
     /* ── core logic ───────────────────────────────────────── */
 
     function init(container) {
+        if (revisions.has(container)) return;
+        revisions.set(container, 0);
         const maxLevels = parseInt(container.dataset.levels) || 3;
 
         // Level 1 is rendered server-side by render_select() in PHP, so the
@@ -171,7 +165,7 @@
         // read the cache file). This removes one redundant HTTP request on
         // every page that displays the menu.
         if (useStatic && !isSelectPopulated(container, 1)) {
-            loadLevelData(1, 0, function (data) {
+            loadLevelData(1, parseInt(vars.custom_root_id, 10) || 0, function (data) {
                 if (data && Array.isArray(data)) populateSelect(container, 1, data);
             });
         }
@@ -179,21 +173,21 @@
         var buttons = qsa('.mlcm-go-button', container);
         buttons.slice(1).forEach(function (b) { b.parentNode.removeChild(b); });
 
-        var debouncedChange = debounce(function (e) {
+        container.addEventListener('change', function (e) {
             var select = e.target;
             if (!select.classList.contains('mlcm-select')) return;
 
             var level    = parseInt(select.dataset.level);
             var parentId = parseInt(select.value);
+            revisions.set(container, revisions.get(container) + 1);
+            resetFrom(container, level);
 
             if (parentId === -1) { resetFrom(container, level); return; }
 
             if (level >= maxLevels) { redirectToCategory(container); return; }
 
             loadSubcategories(container, level, parentId, maxLevels);
-        }, 150);
-
-        container.addEventListener('change', debouncedChange);
+        });
 
         container.addEventListener('click', function (e) {
             if (e.target.classList.contains('mlcm-go-button')) {
@@ -201,10 +195,6 @@
             }
         });
 
-        handleMobileLayout(container);
-        window.addEventListener('resize', debounce(function () {
-            handleMobileLayout(container);
-        }, 100));
     }
 
     function populateSelect(container, level, categories) {
@@ -220,6 +210,7 @@
             var lvl = parseInt(sel.dataset.level);
             if (lvl > fromLevel) {
                 sel.disabled = true;
+                sel.classList.remove('mlcm-loading');
                 sel.value    = '-1';
                 sel.innerHTML = '<option value="-1">' + escHtml(labels[lvl - 1] || 'Level ' + lvl) + '</option>';
             }
@@ -227,6 +218,7 @@
     }
 
     function loadSubcategories(container, level, parentId, maxLevels) {
+        var revision = revisions.get(container);
         var nextLevel  = level + 1;
         var nextSelect = qs('.mlcm-select[data-level="' + nextLevel + '"]', container);
 
@@ -237,10 +229,12 @@
         }
 
         loadLevelData(nextLevel, parentId, function (data) {
+            // An older asynchronous response must never overwrite a new choice
+            // or redirect the visitor after the parent selection has changed.
+            if (revision !== revisions.get(container)) return;
             if (nextSelect) nextSelect.classList.remove('mlcm-loading');
 
             if (!data) {
-                if (nextSelect) nextSelect.disabled = false;
                 return;
             }
 
@@ -265,7 +259,7 @@
         var last    = null;
 
         selects.forEach(function (sel) {
-            if (sel.value !== '-1') last = sel;
+            if (!sel.disabled && sel.value !== '-1') last = sel;
         });
 
         if (!last) return;
@@ -274,18 +268,6 @@
 
         if (url && (url.indexOf('http://') === 0 || url.indexOf('https://') === 0)) {
             window.location.href = url;
-        }
-    }
-
-    function handleMobileLayout(container) {
-        var btn = qs('.mlcm-go-button', container);
-        if (!btn) return;
-        if (window.matchMedia('(max-width: 768px)').matches) {
-            btn.style.width  = '100%';
-            btn.style.margin = '10px 0 0 0';
-        } else {
-            btn.style.width  = '';
-            btn.style.margin = '';
         }
     }
 

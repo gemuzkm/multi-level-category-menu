@@ -1,0 +1,78 @@
+name: Plugin tests
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  assets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: git diff --exit-code -- assets/
+      - run: npm test
+  wordpress:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - php: '7.4'
+            wordpress: '5.8'
+          - php: '8.2'
+            wordpress: '6.3'
+          - php: '8.3'
+            wordpress: 'latest'
+          - php: '8.4'
+            wordpress: 'latest'
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: password
+          MYSQL_DATABASE: wordpress
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -ppassword"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: mysqli, mbstring, intl
+          tools: wp-cli
+          coverage: none
+      - name: PHP syntax
+        run: find . -name '*.php' -not -path './node_modules/*' -print0 | xargs -0 -n1 php -l
+      - name: Install isolated WordPress
+        env:
+          WP_VERSION: ${{ matrix.wordpress }}
+        run: |
+          wp core download --path=/tmp/wordpress --version="$WP_VERSION"
+          wp config create --path=/tmp/wordpress --dbname=wordpress --dbuser=root --dbpass=password --dbhost=127.0.0.1
+          wp core install --path=/tmp/wordpress --url=http://localhost --title=Tests --admin_user=admin --admin_password=test-only-password --admin_email=test@example.com --skip-email
+          ln -s "$GITHUB_WORKSPACE" /tmp/wordpress/wp-content/plugins/multi-level-category-menu
+          wp plugin activate multi-level-category-menu --path=/tmp/wordpress
+      - name: Integration tests on real WordPress APIs
+        env:
+          MLCM_TEST_ENV: '1'
+        run: |
+          wp eval-file "$GITHUB_WORKSPACE/tests/integration.php" --path=/tmp/wordpress
+          for mode in blank early late widget block; do
+            wp eval-file "$GITHUB_WORKSPACE/tests/assets.php" "$mode" --path=/tmp/wordpress
+          done
+          wp eval-file "$GITHUB_WORKSPACE/tests/uninstall.php" --path=/tmp/wordpress
