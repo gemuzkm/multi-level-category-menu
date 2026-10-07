@@ -467,7 +467,7 @@ class Multi_Level_Category_Menu {
 
         $js_content = "window.{$var_name} = {$json};";
 
-        if (file_put_contents($tmp_path, $js_content) === false) {
+        if (file_put_contents($tmp_path, $js_content) !== strlen($js_content)) {
             throw new Exception("Failed to write temp file: {$tmp_path}");
         }
         if (!rename($tmp_path, $filepath)) {
@@ -477,13 +477,11 @@ class Multi_Level_Category_Menu {
 
         if ($this->get_options()['generate_gzip'] && extension_loaded('zlib')) {
             $gz_data = gzencode($js_content, 9);
-            if ($gz_data !== false) {
-                $gz_tmp = $filepath . '.gz.tmp';
-                if (file_put_contents($gz_tmp, $gz_data) !== false) {
-                    rename($gz_tmp, $filepath . '.gz');
-                } else {
-                    @unlink($gz_tmp);
-                }
+            if ($gz_data === false) throw new RuntimeException('Failed to gzip menu data.');
+            $gz_tmp = $filepath . '.gz.tmp';
+            if (file_put_contents($gz_tmp, $gz_data) !== strlen($gz_data) || !rename($gz_tmp, $filepath . '.gz')) {
+                @unlink($gz_tmp);
+                throw new RuntimeException('Failed to write gzip menu data.');
             }
         }
     }
@@ -603,7 +601,7 @@ class Multi_Level_Category_Menu {
     public function maybe_enqueue_frontend_assets() {
         $post = get_queried_object();
         $needed = $post instanceof WP_Post && (
-            has_shortcode($post->post_content, 'mlcm_menu') || has_block('mlcm/menu-block', $post)
+            has_shortcode($post->post_content, 'mlcm_menu') || has_block('mlcm/menu-block', $post->post_content)
         );
         if (apply_filters('mlcm_enqueue_assets', $needed)) $this->enqueue_frontend_assets();
     }

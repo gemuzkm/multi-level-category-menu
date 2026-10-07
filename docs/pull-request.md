@@ -18,7 +18,8 @@ Closes #1.
 
 ## Verification before opening the PR
 
-- 12 Node/jsdom regression tests pass against source and minified frontend.
+- 16 Node/jsdom regression tests pass against source and minified frontend,
+  admin actions and block-editor registration.
 - PHP syntax checks pass for all PHP files.
 - Real WordPress 7.1.3 / PHP 8.5.4 local integration suite passes, including
   query failure, partial-generation failure, publication failure and locking.

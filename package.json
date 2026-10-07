@@ -4,11 +4,12 @@
   "private": true,
   "scripts": {
     "build": "node scripts/build.mjs",
-    "test": "node --test tests/frontend.test.mjs"
+    "test": "node --test tests/*.test.mjs"
   },
   "devDependencies": {
     "clean-css": "5.3.3",
     "jsdom": "26.1.0",
+    "jquery": "3.7.1",
     "terser": "5.44.0"
   }
 }
