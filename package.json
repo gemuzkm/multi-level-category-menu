@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "build": "node scripts/build.mjs",
-    "test": "node --test tests/*.test.mjs"
+    "test": "node --test tests/*.test.mjs",
+    "package": "node scripts/package.mjs"
   },
   "devDependencies": {
     "clean-css": "5.3.3",
