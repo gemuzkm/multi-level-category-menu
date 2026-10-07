@@ -152,12 +152,25 @@
         return null;
     }
 
+    // Returns true when the <select> for the given level already contains at
+    // least one real category option (the placeholder option value="-1" is
+    // always present, so "populated" means options.length > 1).
+    function isSelectPopulated(container, level) {
+        var select = qs('.mlcm-select[data-level="' + level + '"]', container);
+        return !!select && select.options.length > 1;
+    }
+
     /* ── core logic ───────────────────────────────────────── */
 
     function init(container) {
         const maxLevels = parseInt(container.dataset.levels) || 3;
 
-        if (useStatic) {
+        // Level 1 is rendered server-side by render_select() in PHP, so the
+        // first <select> normally arrives with its options already in the HTML.
+        // Only request level-1.js when that select is empty (e.g. PHP could not
+        // read the cache file). This removes one redundant HTTP request on
+        // every page that displays the menu.
+        if (useStatic && !isSelectPopulated(container, 1)) {
             loadLevelData(1, 0, function (data) {
                 if (data && Array.isArray(data)) populateSelect(container, 1, data);
             });
