@@ -1,15 +1,16 @@
 (function(wp) {
     const { registerBlockType } = wp.blocks;
-    const { InspectorControls } = wp.blockEditor;
+    const { InspectorControls, useBlockProps } = wp.blockEditor;
     const { PanelBody, SelectControl, RangeControl } = wp.components;
     const { __ } = wp.i18n;
     const { createElement: el } = wp.element; // Use createElement for creating elements
 
     registerBlockType('mlcm/menu-block', {
+        apiVersion: window.mlcmBlockVars ? Number(mlcmBlockVars.api_version) : 3,
         title: __('Category Menu', 'mlcm'),
         icon: 'menu',
         category: 'widgets',
-        
+
         attributes: {
             layout: {
                 type: 'string',
@@ -26,7 +27,7 @@
 
             return [
                 // Settings panel in inspector
-                el(InspectorControls, null,
+                el(InspectorControls, { key: 'controls' },
                     el(PanelBody, { title: __('Settings', 'mlcm') },
                         el(SelectControl, {
                             label: __('Layout', 'mlcm'),
@@ -42,12 +43,12 @@
                             value: attributes.levels,
                             onChange: (newLevels) => setAttributes({ levels: newLevels }),
                             min: 1,
-                            max: 5
+                            max: window.mlcmBlockVars ? Number(mlcmBlockVars.max_levels) : 10
                         })
                     )
                 ),
                 // Block preview in editor
-                el('div', { className: 'mlcm-block-preview' },
+                el('div', { ...useBlockProps({ className: 'mlcm-block-preview' }), key: 'preview' },
                     el('h3', null, __('Category Menu Preview', 'mlcm')),
                     el('p', null, __('Layout:', 'mlcm') + ' ' + attributes.layout),
                     el('p', null, __('Visible Levels:', 'mlcm') + ' ' + attributes.levels)

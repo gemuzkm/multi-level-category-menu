@@ -2,15 +2,15 @@
   "$schema": "https://schemas.wp.org/trunk/block.json",
   "apiVersion": 3,
   "name": "mlcm/menu-block",
-  "version": "3.9.3",
+  "version": "3.10.0",
   "title": "Multi-Level Category Menu",
   "category": "widgets",
   "icon": "list-view",
   "description": "Displays a multi-level category navigation menu with customisable depth and layout.",
   "keywords": ["category", "menu", "navigation", "dropdown"],
   "textdomain": "mlcm",
-  "editorScript": "file:./block-editor.js",
-  "editorStyle":  "file:../css/block-editor.css",
+  "editorScript": "mlcm-block-editor",
+  "editorStyle":  "mlcm-block-editor",
   "attributes": {
     "layout": {
       "type": "string",

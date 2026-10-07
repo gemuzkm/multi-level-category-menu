@@ -23,7 +23,13 @@ $option_names = [
     'mlcm_custom_root_id',
     'mlcm_excluded_cats',
     'mlcm_use_static_files',
+    'mlcm_auto_regenerate',
+    'mlcm_regen_delay',
+    'mlcm_generate_gzip',
+    'mlcm_generation',
+    'mlcm_legacy_disabled',
 ];
+wp_clear_scheduled_hook('mlcm_scheduled_regenerate');
 
 // Dynamically delete all possible mlcm_level_{N}_label options
 // Read max_levels from DB first; fall back to 10 to ensure full cleanup
