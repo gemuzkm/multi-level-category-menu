@@ -424,6 +424,13 @@ class Multi_Level_Category_Menu {
             }
             $published = true;
             $this->versions_cache = null;
+            // Extension point, e.g. for purging a page cache after publication.
+            // A failing listener must not turn a published generation into an error.
+            try {
+                do_action('mlcm_generation_published', $meta);
+            } catch (Throwable $hook_error) {
+                error_log('MLCM mlcm_generation_published listener failed: ' . $hook_error->getMessage());
+            }
             return ['success' => true, 'message' => 'Menu generated successfully', 'levels' => $levels_written];
         } catch (Throwable $e) {
             return ['success' => false, 'message' => $e->getMessage()];
