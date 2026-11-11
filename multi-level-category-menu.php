@@ -136,7 +136,17 @@ class Multi_Level_Category_Menu {
         $result = $this->generate_static_menus();
         if (!$result['success']) {
             error_log('MLCM scheduled_regenerate failed: ' . $result['message']);
+            // Retry a few times (busy lock, transient filesystem/database errors)
+            // so a change is not left unpublished until the next category edit.
+            // A newer category change schedules its own run and takes precedence.
+            $attempts = (int) get_transient('mlcm_regen_attempts');
+            if ($attempts < 3 && !wp_next_scheduled(self::CRON_HOOK)) {
+                set_transient('mlcm_regen_attempts', $attempts + 1, HOUR_IN_SECONDS);
+                wp_schedule_single_event(time() + 60, self::CRON_HOOK);
+            }
+            return;
         }
+        delete_transient('mlcm_regen_attempts');
     }
 
     // -------------------------------------------------------------------------
