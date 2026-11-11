@@ -71,6 +71,7 @@ mlcm_assert(count($queries) === 0, 'SSR reads generated level 1 without taxonomy
 preg_match_all('/\bid="([^"]+)"/', $html, $ids);
 mlcm_assert(count($ids[1]) === count(array_unique($ids[1])), 'multiple menus have unique IDs');
 mlcm_assert(strpos($html, 'data-static-url') === false, 'unused HTML data attributes removed');
+mlcm_assert(substr_count($html, 'data-leaf="1"') === 2, 'server-rendered leaf categories are marked');
 mlcm_assert(wp_script_is('mlcm-frontend', 'enqueued'), 'shortcode queues frontend script');
 $scripts = wp_scripts();
 mlcm_assert(strpos($scripts->registered['mlcm-frontend']->src, '.min.js') !== false, 'production frontend is minified');
