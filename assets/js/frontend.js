@@ -117,19 +117,20 @@
 
         if (Array.isArray(categories)) {
             html += categories.map(function (cat) {
-                return optionTag(cat.id || cat.term_id || '', cat.name || '', cat.slug || '', cat.url || '');
+                return optionTag(cat.id || cat.term_id || '', cat.name || '', cat.slug || '', cat.url || '', cat.hasChildren === false);
             }).join('');
         } else if (categories && typeof categories === 'object') {
             html += Object.values(categories).map(function (cat) {
-                return optionTag(cat.id || cat.term_id || '', cat.name || '', cat.slug || '', cat.url || '');
+                return optionTag(cat.id || cat.term_id || '', cat.name || '', cat.slug || '', cat.url || '', cat.hasChildren === false);
             }).join('');
         }
 
         return html;
     }
 
-    function optionTag(id, name, slug, url) {
-        return '<option value="' + escAttr(String(id)) + '" data-slug="' + escAttr(slug) + '" data-url="' + escAttr(url) + '">' + escHtml(name) + '</option>';
+    // leaf is true only when the data says the category has no subcategories.
+    function optionTag(id, name, slug, url, leaf) {
+        return '<option value="' + escAttr(String(id)) + '" data-slug="' + escAttr(slug) + '" data-url="' + escAttr(url) + '"' + (leaf ? ' data-leaf="1"' : '') + '>' + escHtml(name) + '</option>';
     }
 
     function escHtml(s) {
@@ -185,6 +186,12 @@
             if (parentId === -1) { resetFrom(container, level); return; }
 
             if (level >= maxLevels) { redirectToCategory(container); return; }
+
+            // A category known to have no subcategories needs no request: open
+            // it straight away. Options without the marker (older cached HTML
+            // or data) keep the load-then-redirect behaviour.
+            var chosen = select.options[select.selectedIndex];
+            if (chosen && chosen.dataset.leaf === '1') { redirectToCategory(container); return; }
 
             loadSubcategories(container, level, parentId, maxLevels);
         });
