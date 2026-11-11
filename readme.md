@@ -1,6 +1,6 @@
 # Multi-Level Category Menu
 
-Version: **3.11.0**
+Version: **3.12.0**
 
 Fast, cache-friendly category navigation for WordPress. The plugin renders a
 chain of dependent dropdowns: the visitor picks a category, the next dropdown
@@ -299,8 +299,8 @@ create and push an annotated tag:
 ```bash
 git switch main
 git pull --ff-only origin main
-git tag -a v3.11.0 -m "Multi-Level Category Menu 3.11.0"
-git push origin v3.11.0
+git tag -a v3.12.0 -m "Multi-Level Category Menu 3.12.0"
+git push origin v3.12.0
 ```
 
 Pushing a `vX.Y.Z` tag runs version validation, asset/minification tests,
@@ -308,8 +308,8 @@ package tests and the WordPress/PHP matrix. Only after all checks pass does the
 workflow publish a GitHub Release with generated notes and these assets:
 
 ```text
-multi-level-category-menu-3.11.0.zip
-multi-level-category-menu-3.11.0.zip.sha256
+multi-level-category-menu-3.12.0.zip
+multi-level-category-menu-3.12.0.zip.sha256
 ```
 
 The tag must match the PHP plugin header, `package.json`,
@@ -344,6 +344,15 @@ manual workflow run does not publish a release. Only the publishing job has
 GitHub only: it does not install updates on WordPress sites.
 
 ## Changelog
+
+### 3.12.0
+
+- Open categories explicitly marked as having no subcategories without an
+  additional static-file or AJAX request.
+- Mark leaf options in server-rendered HTML and dynamically populated selects.
+- Preserve the previous loading behaviour for older HTML and data without a
+  leaf marker; retain empty leaf files for backward compatibility.
+- Add frontend and server-rendering regression tests for leaf markers.
 
 ### 3.11.0
 
