@@ -295,9 +295,9 @@ class Multi_Level_Category_Menu {
         if (is_wp_error($categories)) throw new RuntimeException($categories->get_error_message());
         if (empty($categories)) return [];
 
-        // WordPress caches this hierarchy. parent__in is not a WP_Term_Query
-        // argument; the previous query silently ignored it.
-        $hierarchy = _get_term_hierarchy('category');
+        // parent__in is not a WP_Term_Query argument; the previous query
+        // silently ignored it. Use the cached parent => children map instead.
+        $hierarchy = $this->term_hierarchy();
 
         $result = [];
         foreach ($categories as $category) {
@@ -312,6 +312,31 @@ class Multi_Level_Category_Menu {
 
         $this->sort_categories($result);
         return $result;
+    }
+
+    /**
+     * Parent ID => child IDs map for categories.
+     *
+     * Prefers the hierarchy WordPress already caches. That core helper is
+     * private, so a public-API query is used when it is unavailable or returns
+     * an unexpected value: a core change can then never cause a fatal error
+     * in the AJAX fallback.
+     */
+    private function term_hierarchy() {
+        if (function_exists('_get_term_hierarchy')) {
+            $hierarchy = _get_term_hierarchy('category');
+            if (is_array($hierarchy)) return $hierarchy;
+        }
+        $parents = get_terms([
+            'taxonomy' => 'category', 'hide_empty' => false, 'fields' => 'id=>parent',
+            'number' => 0, 'orderby' => 'none', 'update_term_meta_cache' => false,
+        ]);
+        if (is_wp_error($parents)) throw new RuntimeException($parents->get_error_message());
+        $hierarchy = [];
+        foreach ($parents as $id => $parent) {
+            if ((int) $parent > 0) $hierarchy[(int) $parent][] = (int) $id;
+        }
+        return $hierarchy;
     }
 
     private function sort_categories(&$categories) {
