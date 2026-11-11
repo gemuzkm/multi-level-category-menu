@@ -807,7 +807,7 @@ class Multi_Level_Category_Menu {
             <?php foreach ($cats as $cat) : ?>
                 <option value="<?php echo absint($cat['id']); ?>"
                         data-slug="<?php echo esc_attr($cat['slug'] ?? ''); ?>"
-                        data-url="<?php echo esc_url($cat['url'] ?? ''); ?>">
+                        data-url="<?php echo esc_url($cat['url'] ?? ''); ?>"<?php echo (($cat['hasChildren'] ?? null) === false) ? ' data-leaf="1"' : ''; ?>>
                     <?php echo esc_html($cat['name'] ?? ''); ?>
                 </option>
             <?php endforeach; ?>

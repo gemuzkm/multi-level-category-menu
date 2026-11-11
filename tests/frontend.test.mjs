@@ -110,4 +110,26 @@ for (const file of ['frontend.js', 'frontend.min.js']) {
         assert.equal(x.select(2).options[1].textContent, '<script>alert(1)</script>');
         x.dom.window.close();
     });
+    test(`${file}: a leaf category needs no request; the marker comes from hasChildren`, () => {
+        const x = setup(file, menu().replace('<option value="20">B</option>', '<option value="20" data-leaf="1">B</option>'));
+        x.change(20);
+        assert.equal(x.scripts.length, 0);
+        assert.equal(x.select(2).disabled, true);
+        x.change(10);
+        assert.equal(x.scripts.length, 1);
+        x.deliver(x.scripts[0], 'mlcmL2_10', [
+            { id: 11, name: 'Leaf', hasChildren: false },
+            { id: 12, name: 'Parent', hasChildren: true },
+            { id: 13, name: 'Unknown' }
+        ]);
+        assert.equal(x.select(2).options[1].dataset.leaf, '1');
+        assert.equal(x.select(2).options[2].dataset.leaf, undefined);
+        assert.equal(x.select(2).options[3].dataset.leaf, undefined);
+        x.change(11, 2);
+        assert.equal(x.scripts.length, 1);
+        x.change(13, 2);
+        assert.equal(x.scripts.length, 2);
+        assert.match(x.scripts[1].src, /\/l3-13\.js\?v=test$/);
+        x.dom.window.close();
+    });
 }
