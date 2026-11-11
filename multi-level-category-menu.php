@@ -437,6 +437,7 @@ class Multi_Level_Category_Menu {
         } finally {
             $this->cache_dir = $base_dir;
             if (!$published && $staging && is_dir($staging)) $this->remove_generation($staging);
+            if ($published) $this->prune_generations($generation_id);
             if (is_resource($lock)) {
                 flock($lock, LOCK_UN);
                 fclose($lock);
@@ -450,6 +451,33 @@ class Multi_Level_Category_Menu {
             if (is_file($file) && !is_link($file)) @unlink($file);
         }
         @rmdir($directory);
+    }
+
+    /**
+     * Remove superseded generations once cached pages can no longer need them.
+     *
+     * The retention clock starts when a generation is first seen as superseded
+     * (marker file), not when it was created: a long-lived generation may still
+     * be referenced by cached HTML right after it is replaced. Runs under the
+     * generation lock and never throws. Return 0 from the filter to disable.
+     */
+    private function prune_generations($current_id) {
+        try {
+            $ttl = (int) apply_filters('mlcm_generation_ttl', 30 * DAY_IN_SECONDS);
+            if ($ttl <= 0) return;
+            foreach (glob($this->cache_dir . '/gen-*', GLOB_ONLYDIR) ?: [] as $directory) {
+                if (basename($directory) === $current_id || is_link($directory)) continue;
+                $marker = $directory . '/retired.txt';
+                if (!is_file($marker)) {
+                    @touch($marker);
+                    continue;
+                }
+                $retired_at = @filemtime($marker);
+                if ($retired_at && time() - $retired_at > $ttl) $this->remove_generation($directory);
+            }
+        } catch (Throwable $error) {
+            error_log('MLCM generation pruning failed: ' . $error->getMessage());
+        }
     }
 
     private function write_js_file($filename, $data) {
