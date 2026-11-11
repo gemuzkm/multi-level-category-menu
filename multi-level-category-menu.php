@@ -1,7 +1,7 @@
 <?php
 /*
 Plugin Name: Multi-Level Category Menu
-Description: Cache-friendly category navigation with per-parent static files, background regeneration, a block, widget and shortcode.
+Description: Fast multi-level category dropdown navigation, available as a shortcode, block and widget. Built for sites behind full-page caching and a CDN: subcategories load from static files, with optional background regeneration.
 Version: 3.10.0
 Requires at least: 5.8
 Tested up to: 7.1
