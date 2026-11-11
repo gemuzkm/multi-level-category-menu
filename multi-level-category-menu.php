@@ -2,7 +2,7 @@
 /*
 Plugin Name: Multi-Level Category Menu
 Description: Fast multi-level category dropdown navigation, available as a shortcode, block and widget. Built for sites behind full-page caching and a CDN: subcategories load from static files, with optional background regeneration.
-Version: 3.10.0
+Version: 3.11.0
 Requires at least: 5.8
 Tested up to: 7.1
 Requires PHP: 7.4
@@ -249,7 +249,7 @@ class Multi_Level_Category_Menu {
             'mlcm-block-editor',
             plugins_url('assets/js/block-editor.js', __FILE__),
             ['wp-blocks', 'wp-block-editor', 'wp-i18n', 'wp-element', 'wp-components'],
-            file_exists($js_path) ? filemtime($js_path) : '3.10.0'
+            file_exists($js_path) ? filemtime($js_path) : '3.11.0'
         );
 
         register_block_type('mlcm/menu-block', [
@@ -695,7 +695,7 @@ class Multi_Level_Category_Menu {
             $css_ver  = filemtime($css_reg);
         } else {
             $css_file = false;
-            $css_ver  = '3.10.0';
+            $css_ver  = '3.11.0';
         }
 
         if ($css_file) {
@@ -713,7 +713,7 @@ class Multi_Level_Category_Menu {
             $js_ver  = filemtime($js_reg);
         } else {
             $js_file = false;
-            $js_ver  = '3.10.0';
+            $js_ver  = '3.11.0';
         }
 
         if ($js_file) {
@@ -1016,7 +1016,7 @@ class Multi_Level_Category_Menu {
             $js_ver  = filemtime($js_reg);
         } else {
             $js_file = $plugin_dir_url . 'assets/js/block-editor.js';
-            $js_ver  = '3.10.0';
+            $js_ver  = '3.11.0';
         }
 
         wp_register_script('mlcm-block-editor', $js_file,
@@ -1034,7 +1034,7 @@ class Multi_Level_Category_Menu {
             $css_ver  = filemtime($css_reg);
         } else {
             $css_file = $plugin_dir_url . 'assets/css/block-editor.css';
-            $css_ver  = '3.10.0';
+            $css_ver  = '3.11.0';
         }
 
         wp_register_style('mlcm-block-editor', $css_file, [], $css_ver);
@@ -1063,7 +1063,7 @@ class Multi_Level_Category_Menu {
             $css_ver  = filemtime($css_reg);
         } else {
             $css_file = $plugin_dir_url . 'assets/css/admin.css';
-            $css_ver  = '3.10.0';
+            $css_ver  = '3.11.0';
         }
         wp_enqueue_style('mlcm-admin', $css_file, [], $css_ver);
 
@@ -1077,7 +1077,7 @@ class Multi_Level_Category_Menu {
             $js_ver  = filemtime($js_reg);
         } else {
             $js_file = $plugin_dir_url . 'assets/js/admin.js';
-            $js_ver  = '3.10.0';
+            $js_ver  = '3.11.0';
         }
         wp_enqueue_script('mlcm-admin', $js_file, ['jquery'], $js_ver, true);
 
