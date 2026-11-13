@@ -270,7 +270,14 @@ npm test
 
 Terser rebuilds all three JS pairs; clean-css rebuilds all three CSS pairs.
 Commit sources and generated `.min.*` files together. CI rebuilds the assets
-and fails on differences, so stale minified copies cannot pass.
+and fails on differences, so stale minified copies cannot pass a pull request.
+
+As a safety net, the **Build assets** workflow rebuilds the minified files
+when a source asset, the build script or the npm manifests change on `main`.
+If the result differs, it runs `npm test` and commits the rebuilt files back
+as `github-actions[bot]`; that commit does not start other workflows. It can
+also be started manually on any branch that contains it. Pull requests still
+have to include up-to-date minified files.
 
 GitHub Actions runs frontend regression tests against both source and minified
 JS, PHP syntax checks, and integration tests on real WordPress with MySQL
@@ -339,9 +346,10 @@ Packaging uses `git archive` and writes the ZIP and SHA256 files to the ignored
 to inspect the ZIP contents.
 
 Pull requests and pushes to `main` or `develop` run validation only, and a
-manual workflow run does not publish a release. Only the publishing job has
-`contents: write`; it uses GitHub's built-in token. A release is published on
-GitHub only: it does not install updates on WordPress sites.
+manual workflow run does not publish a release. Only the publishing job and
+the **Build assets** job have `contents: write`; both use GitHub's built-in
+token. A release is published on GitHub only: it does not install updates on
+WordPress sites.
 
 ## Changelog
 
