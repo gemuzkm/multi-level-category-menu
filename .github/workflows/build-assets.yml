@@ -1,10 +1,10 @@
 name: Build assets
 
 # Rebuilds every assets/js/*.min.js and assets/css/*.min.css with the pinned
-# terser and clean-css (scripts/build.mjs) whenever a source file changes on
-# main, and commits the result back. A push made with GITHUB_TOKEN does not
-# start other workflows, so there is no loop; the tests therefore run here
-# before the rebuilt files are pushed.
+# terser and clean-css (.github/actions/build-assets) whenever a source file
+# changes on main, and commits the result back. A push made with GITHUB_TOKEN
+# does not start other workflows, so there is no loop; the tests therefore run
+# here before the rebuilt files are pushed.
 
 on:
   push:
@@ -12,7 +12,7 @@ on:
     paths:
       - 'assets/js/*.js'
       - 'assets/css/*.css'
-      - 'scripts/build.mjs'
+      - '.github/actions/build-assets/action.yml'
       - 'package.json'
       - 'package-lock.json'
       - '.github/workflows/build-assets.yml'
@@ -45,16 +45,7 @@ jobs:
       - run: npm ci
 
       - name: Minify with terser and clean-css
-        run: |
-          set -eu
-          npm run build
-          for file in assets/js/*.min.js assets/css/*.min.css; do
-            test -s "$file"
-          done
-          for file in assets/js/*.min.js; do
-            node --check "$file"
-          done
-          ls -l assets/js assets/css
+        uses: ./.github/actions/build-assets
 
       - name: Commit if changed
         id: commit

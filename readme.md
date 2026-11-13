@@ -264,20 +264,22 @@ automatic merge is configured.
 
 ```bash
 npm ci
-npm run build
 npm test
 ```
 
-Terser rebuilds all three JS pairs; clean-css rebuilds all three CSS pairs.
-Commit sources and generated `.min.*` files together. CI rebuilds the assets
-and fails on differences, so stale minified copies cannot pass a pull request.
+The build, version check and packaging steps live in the workflows and in two
+local actions under `.github/actions/`; the repository has no local build
+script. The pinned terser rebuilds all three JS pairs and clean-css all three
+CSS pairs. CI rebuilds the assets and fails on differences, so stale minified
+copies cannot pass a pull request.
 
-As a safety net, the **Build assets** workflow rebuilds the minified files
-when a source asset, the build script or the npm manifests change on `main`.
-If the result differs, it runs `npm test` and commits the rebuilt files back
-as `github-actions[bot]`; that commit does not start other workflows. It can
-also be started manually on any branch that contains it. Pull requests still
-have to include up-to-date minified files.
+To rebuild the minified files of a branch, run the **Build assets** workflow
+manually on it (**Actions → Build assets → Run workflow**). It commits the
+rebuilt files to that branch as `github-actions[bot]`. That commit does not
+start other workflows, so push another commit or reopen the pull request to
+run its checks. The same workflow runs automatically when a source asset, the
+build action or the npm manifests change on `main`; it runs `npm test` before
+it pushes rebuilt files.
 
 GitHub Actions runs frontend regression tests against both source and minified
 JS, PHP syntax checks, and integration tests on real WordPress with MySQL
@@ -311,20 +313,20 @@ git push origin v3.12.0
 ```
 
 Pushing a `vX.Y.Z` tag runs version validation, asset/minification tests,
-package tests and the WordPress/PHP matrix. Only after all checks pass does the
-workflow publish a GitHub Release with generated notes and these assets:
+package checks and the WordPress/PHP matrix. Only after all checks pass does
+the workflow publish a GitHub Release with generated notes and these assets:
 
 ```text
 multi-level-category-menu-3.12.0.zip
 multi-level-category-menu-3.12.0.zip.sha256
 ```
 
-The tag must match the PHP plugin header, `package.json`,
+The tag must match the PHP plugin header, `package.json`, `package-lock.json`,
 `assets/js/block.json` and the version line at the top of this file. Its commit
-must belong to `main`. For a later release, update all four versions,
-rebuild and commit the assets, merge the PR, then push the new tag. Only stable
-`vX.Y.Z` releases are supported. Do not move a published tag; existing
-releases are never overwritten.
+must belong to `main`. For a later release, update all five versions, make
+sure the minified assets are up to date, merge the PR, then push the new tag.
+Only stable `vX.Y.Z` releases are supported. Do not move a published tag;
+existing releases are never overwritten.
 
 The ZIP contains one `multi-level-category-menu/` directory with only the
 plugin PHP files, `readme.md`, `assets/` and `includes/`. Tests, build tools,
@@ -332,18 +334,16 @@ dependency files and GitHub configuration stay in the development repository.
 GitHub's automatically generated source archives are not the installable
 package; use the named plugin ZIP.
 
-To build the same package locally from a clean, committed checkout:
+The `.github/actions/package` action builds the package with `git archive`
+from the checked-out commit and then inspects it: one root directory, runtime
+files only, the expected version and a matching SHA256 file. To build the same
+ZIP locally from a clean, committed checkout:
 
 ```bash
-npm ci
-npm run build
-npm test
-npm run package
+git archive --format=zip --prefix=multi-level-category-menu/ \
+  --output=multi-level-category-menu-3.12.0.zip HEAD -- \
+  multi-level-category-menu.php uninstall.php readme.md assets includes
 ```
-
-Packaging uses `git archive` and writes the ZIP and SHA256 files to the ignored
-`dist/` directory. The packaging tests also need Python 3's standard library
-to inspect the ZIP contents.
 
 Pull requests and pushes to `main` or `develop` run validation only, and a
 manual workflow run does not publish a release. Only the publishing job and
