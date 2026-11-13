@@ -1,0 +1,80 @@
+name: Build assets
+
+# Rebuilds every assets/js/*.min.js and assets/css/*.min.css with the pinned
+# terser and clean-css (scripts/build.mjs) whenever a source file changes on
+# main, and commits the result back. A push made with GITHUB_TOKEN does not
+# start other workflows, so there is no loop; the tests therefore run here
+# before the rebuilt files are pushed.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'assets/js/*.js'
+      - 'assets/css/*.css'
+      - 'scripts/build.mjs'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/build-assets.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-assets-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Minify JS and CSS
+    if: github.ref_type == 'branch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Minify with terser and clean-css
+        run: |
+          set -eu
+          npm run build
+          for file in assets/js/*.min.js assets/css/*.min.css; do
+            test -s "$file"
+          done
+          for file in assets/js/*.min.js; do
+            node --check "$file"
+          done
+          ls -l assets/js assets/css
+
+      - name: Commit if changed
+        id: commit
+        run: |
+          set -eu
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- assets/js/*.min.js assets/css/*.min.css
+          if git diff --cached --quiet; then
+            echo "Minified assets are already up to date"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            git commit -m "build: rebuild minified assets"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Test rebuilt assets
+        if: steps.commit.outputs.changed == 'true'
+        run: npm test
+
+      - name: Push
+        if: steps.commit.outputs.changed == 'true'
+        run: git push origin "HEAD:${GITHUB_REF_NAME}"
