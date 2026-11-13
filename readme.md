@@ -1,6 +1,6 @@
 # Multi-Level Category Menu
 
-Version: **3.12.0**
+Version: **3.12.1**
 
 Fast, cache-friendly category navigation for WordPress. The plugin renders a
 chain of dependent dropdowns: the visitor picks a category, the next dropdown
@@ -302,14 +302,20 @@ cache, CSP and CDN.
 
 ## Publishing a release
 
+To prepare a release, create a `release/X.Y.Z` branch from `main`. The **Bump
+version** workflow sets that version in the PHP file, `package.json`,
+`package-lock.json`, `assets/js/block.json` and this file, and commits the
+result to the branch. Add the changelog entry and open a pull request: the
+commit made by the workflow does not start the checks, the pull request does.
+
 After the release changes are merged into `main` and validated on staging,
 create and push an annotated tag:
 
 ```bash
 git switch main
 git pull --ff-only origin main
-git tag -a v3.12.0 -m "Multi-Level Category Menu 3.12.0"
-git push origin v3.12.0
+git tag -a v3.12.1 -m "Multi-Level Category Menu 3.12.1"
+git push origin v3.12.1
 ```
 
 Pushing a `vX.Y.Z` tag runs version validation, asset/minification tests,
@@ -317,16 +323,15 @@ package checks and the WordPress/PHP matrix. Only after all checks pass does
 the workflow publish a GitHub Release with generated notes and these assets:
 
 ```text
-multi-level-category-menu-3.12.0.zip
-multi-level-category-menu-3.12.0.zip.sha256
+multi-level-category-menu-3.12.1.zip
+multi-level-category-menu-3.12.1.zip.sha256
 ```
 
 The tag must match the PHP plugin header, `package.json`, `package-lock.json`,
 `assets/js/block.json` and the version line at the top of this file. Its commit
-must belong to `main`. For a later release, update all five versions, make
-sure the minified assets are up to date, merge the PR, then push the new tag.
-Only stable `vX.Y.Z` releases are supported. Do not move a published tag;
-existing releases are never overwritten.
+must belong to `main`. Make sure the minified assets are up to date before the
+release branch is merged. Only stable `vX.Y.Z` releases are supported. Do not
+move a published tag; existing releases are never overwritten.
 
 The ZIP contains one `multi-level-category-menu/` directory with only the
 plugin PHP files, `readme.md`, `assets/` and `includes/`. Tests, build tools,
@@ -341,17 +346,26 @@ ZIP locally from a clean, committed checkout:
 
 ```bash
 git archive --format=zip --prefix=multi-level-category-menu/ \
-  --output=multi-level-category-menu-3.12.0.zip HEAD -- \
+  --output=multi-level-category-menu-3.12.1.zip HEAD -- \
   multi-level-category-menu.php uninstall.php readme.md assets includes
 ```
 
 Pull requests and pushes to `main` or `develop` run validation only, and a
 manual workflow run does not publish a release. Only the publishing job and
-the **Build assets** job have `contents: write`; both use GitHub's built-in
-token. A release is published on GitHub only: it does not install updates on
-WordPress sites.
+the **Build assets** and **Bump version** jobs have `contents: write`; they
+use GitHub's built-in token. A release is published on GitHub only: it does
+not install updates on WordPress sites.
 
 ## Changelog
+
+### 3.12.1
+
+- Maintenance release: the plugin code is unchanged apart from the version.
+- Move the build, version check and packaging from `scripts/` into GitHub
+  Actions workflows and two local actions.
+- Rebuild minified assets automatically when their sources change on `main`.
+- Include `package-lock.json` in the release version check.
+- Add the **Bump version** workflow for `release/X.Y.Z` branches.
 
 ### 3.12.0
 
