@@ -1,0 +1,133 @@
+name: Bump version
+
+# Sets one plugin version in the PHP header and asset fallbacks, package.json,
+# package-lock.json, block.json and the README. Runs when a release/X.Y.Z
+# branch is pushed (the version comes from the branch name) or manually on a
+# branch with an explicit version. The commit is pushed with GITHUB_TOKEN and
+# does not start other workflows: open a pull request to run the checks.
+
+on:
+  push:
+    branches: ['release/**']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: New version X.Y.Z
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bump-version-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    name: Set the version
+    if: github.ref_type == 'branch' && github.ref_name != github.event.repository.default_branch
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: '22'
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+
+      - name: Set the version in all files
+        id: bump
+        shell: python
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          import os, pathlib, re
+
+          STABLE = r'(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)'
+          target = (os.environ.get('INPUT_VERSION') or '').strip()
+          if not target and os.environ['BRANCH'].startswith('release/'):
+              target = os.environ['BRANCH'][len('release/'):]
+          if not re.fullmatch(STABLE, target):
+              raise SystemExit('::error::No stable X.Y.Z version: push a release/X.Y.Z branch or pass the version input.')
+
+          changed = []
+
+          def edit(name, transform):
+              path = pathlib.Path(name)
+              before = path.read_bytes().decode('utf-8')
+              after = transform(before)
+              if after != before:
+                  path.write_bytes(after.encode('utf-8'))
+                  changed.append(name)
+              return after
+
+          def field(count):
+              return lambda text: re.sub(r'("version":\s*")[^"]*(")', lambda m: m.group(1) + target + m.group(2), text, count=count)
+
+          php_name = 'multi-level-category-menu.php'
+          php = pathlib.Path(php_name).read_bytes().decode('utf-8')
+          header = re.search(r'^Version:[ \t]*(' + STABLE + r')[ \t]*\r?$', php, re.M)
+          if not header:
+              raise SystemExit('::error::Cannot read a stable version from the PHP plugin header.')
+          current = header.group(1)
+          exact = re.compile(r'(?<![\w.])' + re.escape(current) + r'(?![\w.])')
+
+          # PHP header and every asset fallback version.
+          edit(php_name, lambda text: exact.sub(target, text))
+          edit('package.json', field(1))
+          # The first two version fields of the lockfile describe this project.
+          edit('package-lock.json', field(2))
+          edit('assets/js/block.json', field(1))
+
+          def readme(text):
+              head, separator, tail = text.partition('\n## Changelog')
+              head = re.sub(r'^(Version:[ \t]*\*\*)[^*]*(\*\*)', lambda m: m.group(1) + target + m.group(2), head, count=1, flags=re.M)
+              # Tag and package names in the release instructions.
+              head = exact.sub(target, head)
+              return head + separator + tail
+
+          text = edit('readme.md', readme)
+          if not re.search(r'^### ' + re.escape(target) + r'[ \t]*\r?$', text, re.M):
+              print('::warning::readme.md has no changelog section for ' + target + '.')
+
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('version=' + target + '\n')
+              output.write('changed=' + ('true' if changed else 'false') + '\n')
+          print('Version ' + current + ' -> ' + target + '; changed: ' + (', '.join(changed) or 'nothing'))
+
+      - name: Check the result
+        env:
+          VERSION: ${{ steps.bump.outputs.version }}
+        run: |
+          set -eu
+          php -l multi-level-category-menu.php
+          node -e '
+            const v = process.env.VERSION, fs = require("fs");
+            const lock = require("./package-lock.json");
+            const php = fs.readFileSync("multi-level-category-menu.php", "utf8").match(/^Version:\s*(\S+)\s*$/m);
+            const readme = fs.readFileSync("readme.md", "utf8").match(/^Version:\s*\*\*([^*]+)\*\*\s*$/m);
+            const found = [php && php[1], readme && readme[1], require("./package.json").version, lock.version, lock.packages[""].version, require("./assets/js/block.json").version];
+            if (found.some(x => x !== v)) { console.error("Version mismatch:", found); process.exit(1); }
+            console.log("All six version fields are", v);
+          '
+          git diff --stat
+
+      - name: Commit and push
+        if: steps.bump.outputs.changed == 'true'
+        env:
+          VERSION: ${{ steps.bump.outputs.version }}
+        run: |
+          set -eu
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- multi-level-category-menu.php package.json package-lock.json assets/js/block.json readme.md
+          git commit -m "chore: set version to $VERSION"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
