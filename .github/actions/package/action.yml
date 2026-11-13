@@ -1,0 +1,58 @@
+name: Package plugin
+description: Build the installable WordPress ZIP and its SHA256 file from the checked-out commit, then inspect the archive.
+inputs:
+  version:
+    description: Plugin version X.Y.Z used in the file names
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Build ZIP and checksum
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+      run: |
+        set -eu
+        SLUG=multi-level-category-menu
+        PATHS="multi-level-category-menu.php uninstall.php readme.md assets includes"
+        if ! grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' <<<"$VERSION"; then
+          echo "::error::Package version must be a stable X.Y.Z version."
+          exit 1
+        fi
+        # Package exactly the checked-out commit, never local dependencies,
+        # secrets, untracked files or dirty runtime files.
+        git diff --exit-code HEAD -- $PATHS
+        TREE="$(git ls-tree -r HEAD -- $PATHS)"
+        if grep -Eq '^(120000|160000) ' <<<"$TREE"; then
+          echo "::error::Runtime package must not contain symlinks or submodules."
+          exit 1
+        fi
+        mkdir -p dist
+        git archive --format=zip --prefix="$SLUG/" --output="dist/$SLUG-$VERSION.zip" HEAD -- $PATHS
+        (cd dist && sha256sum "$SLUG-$VERSION.zip" > "$SLUG-$VERSION.zip.sha256")
+    - name: Inspect archive
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+      run: |
+        set -eu
+        SLUG=multi-level-category-menu
+        python3 - "dist/$SLUG-$VERSION.zip" "$SLUG" "$VERSION" <<'PY'
+        import re, sys, zipfile
+        archive, slug, version = sys.argv[1:4]
+        package = zipfile.ZipFile(archive)
+        assert package.testzip() is None
+        names = package.namelist()
+        assert all(name.startswith(slug + '/') and '..' not in name for name in names)
+        required = [slug + '/multi-level-category-menu.php', slug + '/includes/widget.php']
+        for asset in ('frontend', 'admin', 'block-editor'):
+            required += [slug + '/assets/js/' + asset + '.min.js', slug + '/assets/css/' + asset + '.min.css']
+        missing = [name for name in required if name not in names]
+        assert not missing, missing
+        assert not any(re.search(r'/(?:docs|tests|scripts|node_modules|\.github|\.git|dist)(?:/|$)', name) for name in names)
+        assert not any(re.search(r'/package(?:-lock)?\.json$', name) for name in names)
+        php = package.read(slug + '/multi-level-category-menu.php').decode()
+        assert 'Version: ' + version in php
+        print(len(names), 'archive entries verified')
+        PY
+        (cd dist && sha256sum --check "$SLUG-$VERSION.zip.sha256")
